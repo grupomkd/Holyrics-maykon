@@ -591,54 +591,110 @@ function defaultTheme(){
 }
 
 /* =========================================================
-   BÍBLIA — via API pública ABíbliaDigital (abibliadigital.com.br)
-   Busca livros/capítulos/versículos ao vivo em vez de embutir
-   o texto inteiro no app (evita problema de direitos autorais
-   e deixa o arquivo leve). API open source, licença BSD.
+   BÍBLIA — via arquivos estáticos do GitHub (MaatheusGois/bible)
+   Fonte confiável (CDN do GitHub, sem limite de requisições,
+   sem necessidade de conta/token). Inclui NVI, ARC, ACF, AA
+   e King James Atualizada. Cada livro é baixado inteiro uma
+   vez e cacheado (memória + localStorage).
    ========================================================= */
-const BIBLE_API = 'https://www.abibliadigital.com.br/api';
+const BIBLE_RAW_BASE = 'https://raw.githubusercontent.com/MaatheusGois/bible/main/versions/pt-br';
 const bibleVersions = [
   {id:'nvi', label:'NVI'},
-  {id:'ra', label:'ARA (Almeida Atualizada)'},
+  {id:'arc', label:'ARC (Almeida Revista e Corrigida)'},
   {id:'acf', label:'ACF (Almeida Corrigida Fiel)'},
-  {id:'apee', label:'APEE'},
-  {id:'rvr', label:'RVR (Espanhol)'},
-  {id:'kjv', label:'KJV (Inglês)'},
-  {id:'bbe', label:'BBE (Inglês)'},
+  {id:'aa',  label:'AA (Almeida Revisada Imprensa Bíblica)'},
 ];
 const bibleGroupColors = {
   'Pentateuco':'#8d5b3c', 'Históricos':'#d97b29', 'Poéticos':'#c0392b',
-  'Profetas Maiores':'#7d3c98', 'Profetas Menores':'#9b59b6', 'Profetas':'#7d3c98',
-  'Evangelhos':'#2e6db4', 'Cartas Paulinas':'#277a5f', 'Cartas Gerais':'#1b5e4a',
-  'Apocalipse':'#9acd32',
+  'Profetas':'#7d3c98', 'Evangelhos':'#2e6db4', 'Cartas Paulinas':'#277a5f',
+  'Cartas Gerais':'#1b5e4a', 'Apocalipse':'#9acd32',
 };
 function colorForGroup(g){ return bibleGroupColors[g] || '#555a6e'; }
-function getBibleToken(){ return localStorage.getItem('abibliadigital_token') || ''; }
-function bibleHeaders(extra){
-  const t=getBibleToken();
-  return Object.assign({}, extra||{}, t? {Authorization:'Bearer '+t} : {});
-}
+const bibleBookList = [
+  {id:'gn',name:'Gênesis',short:'Gn',group:'Pentateuco'},
+  {id:'ex',name:'Êxodo',short:'Ex',group:'Pentateuco'},
+  {id:'lv',name:'Levítico',short:'Lv',group:'Pentateuco'},
+  {id:'nm',name:'Números',short:'Nm',group:'Pentateuco'},
+  {id:'dt',name:'Deuteronômio',short:'Dt',group:'Pentateuco'},
+  {id:'js',name:'Josué',short:'Js',group:'Históricos'},
+  {id:'jd',name:'Juízes',short:'Jz',group:'Históricos'},
+  {id:'rt',name:'Rute',short:'Rt',group:'Históricos'},
+  {id:'1sm',name:'1 Samuel',short:'1Sm',group:'Históricos'},
+  {id:'2sm',name:'2 Samuel',short:'2Sm',group:'Históricos'},
+  {id:'1kgs',name:'1 Reis',short:'1Rs',group:'Históricos'},
+  {id:'2kgs',name:'2 Reis',short:'2Rs',group:'Históricos'},
+  {id:'1ch',name:'1 Crônicas',short:'1Cr',group:'Históricos'},
+  {id:'2ch',name:'2 Crônicas',short:'2Cr',group:'Históricos'},
+  {id:'ezr',name:'Esdras',short:'Ed',group:'Históricos'},
+  {id:'ne',name:'Neemias',short:'Ne',group:'Históricos'},
+  {id:'et',name:'Ester',short:'Et',group:'Históricos'},
+  {id:'job',name:'Jó',short:'Jó',group:'Poéticos'},
+  {id:'ps',name:'Salmos',short:'Sl',group:'Poéticos'},
+  {id:'prv',name:'Provérbios',short:'Pv',group:'Poéticos'},
+  {id:'ec',name:'Eclesiastes',short:'Ec',group:'Poéticos'},
+  {id:'so',name:'Cânticos',short:'Ct',group:'Poéticos'},
+  {id:'is',name:'Isaías',short:'Is',group:'Profetas'},
+  {id:'jr',name:'Jeremias',short:'Jr',group:'Profetas'},
+  {id:'lm',name:'Lamentações',short:'Lm',group:'Profetas'},
+  {id:'ez',name:'Ezequiel',short:'Ez',group:'Profetas'},
+  {id:'dn',name:'Daniel',short:'Dn',group:'Profetas'},
+  {id:'ho',name:'Oséias',short:'Os',group:'Profetas'},
+  {id:'jl',name:'Joel',short:'Jl',group:'Profetas'},
+  {id:'am',name:'Amós',short:'Am',group:'Profetas'},
+  {id:'ob',name:'Obadias',short:'Ob',group:'Profetas'},
+  {id:'jn',name:'Jonas',short:'Jn',group:'Profetas'},
+  {id:'mi',name:'Miquéias',short:'Mq',group:'Profetas'},
+  {id:'na',name:'Naum',short:'Na',group:'Profetas'},
+  {id:'hk',name:'Habacuque',short:'Hc',group:'Profetas'},
+  {id:'zp',name:'Sofonias',short:'Sf',group:'Profetas'},
+  {id:'hg',name:'Ageu',short:'Ag',group:'Profetas'},
+  {id:'zc',name:'Zacarias',short:'Zc',group:'Profetas'},
+  {id:'ml',name:'Malaquias',short:'Ml',group:'Profetas'},
+  {id:'mt',name:'Mateus',short:'Mt',group:'Evangelhos'},
+  {id:'mk',name:'Marcos',short:'Mc',group:'Evangelhos'},
+  {id:'lk',name:'Lucas',short:'Lc',group:'Evangelhos'},
+  {id:'jo',name:'João',short:'Jo',group:'Evangelhos'},
+  {id:'act',name:'Atos',short:'At',group:'Evangelhos'},
+  {id:'rm',name:'Romanos',short:'Rm',group:'Cartas Paulinas'},
+  {id:'1co',name:'1 Coríntios',short:'1Co',group:'Cartas Paulinas'},
+  {id:'2co',name:'2 Coríntios',short:'2Co',group:'Cartas Paulinas'},
+  {id:'gl',name:'Gálatas',short:'Gl',group:'Cartas Paulinas'},
+  {id:'eph',name:'Efésios',short:'Ef',group:'Cartas Paulinas'},
+  {id:'ph',name:'Filipenses',short:'Fp',group:'Cartas Paulinas'},
+  {id:'cl',name:'Colossenses',short:'Cl',group:'Cartas Paulinas'},
+  {id:'1ts',name:'1 Tessalonicenses',short:'1Ts',group:'Cartas Paulinas'},
+  {id:'2ts',name:'2 Tessalonicenses',short:'2Ts',group:'Cartas Paulinas'},
+  {id:'1tm',name:'1 Timóteo',short:'1Tm',group:'Cartas Paulinas'},
+  {id:'2tm',name:'2 Timóteo',short:'2Tm',group:'Cartas Paulinas'},
+  {id:'tt',name:'Tito',short:'Tt',group:'Cartas Paulinas'},
+  {id:'phm',name:'Filemom',short:'Fm',group:'Cartas Paulinas'},
+  {id:'hb',name:'Hebreus',short:'Hb',group:'Cartas Gerais'},
+  {id:'jm',name:'Tiago',short:'Tg',group:'Cartas Gerais'},
+  {id:'1pe',name:'1 Pedro',short:'1Pe',group:'Cartas Gerais'},
+  {id:'2pe',name:'2 Pedro',short:'2Pe',group:'Cartas Gerais'},
+  {id:'1jo',name:'1 João',short:'1Jo',group:'Cartas Gerais'},
+  {id:'2jo',name:'2 João',short:'2Jo',group:'Cartas Gerais'},
+  {id:'3jo',name:'3 João',short:'3Jo',group:'Cartas Gerais'},
+  {id:'jud',name:'Judas',short:'Jd',group:'Cartas Gerais'},
+  {id:'re',name:'Apocalipse',short:'Ap',group:'Apocalipse'},
+];
 function debounce(fn, wait){
   let t; return function(...args){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,args), wait); };
 }
-let bibleBooksCache = JSON.parse(localStorage.getItem('bible_books_cache') || 'null');
-const bibleChapterCache = {};
-async function ensureBibleBooks(){
-  if(bibleBooksCache) return bibleBooksCache;
-  const res = await fetch(`${BIBLE_API}/books`, {headers: bibleHeaders()});
+const bibleBookCache = {};
+async function fetchBibleBook(version, bookId){
+  const key = `${version}|${bookId}`;
+  if(bibleBookCache[key]) return bibleBookCache[key];
+  const lsKey = 'biblebook_'+key;
+  try{
+    const cached = localStorage.getItem(lsKey);
+    if(cached){ const parsed = JSON.parse(cached); bibleBookCache[key]=parsed; return parsed; }
+  }catch(e){}
+  const res = await fetch(`${BIBLE_RAW_BASE}/${version}/${bookId}/${bookId}.json`);
   if(!res.ok) throw new Error('status '+res.status);
   const data = await res.json();
-  bibleBooksCache = data;
-  localStorage.setItem('bible_books_cache', JSON.stringify(data));
-  return data;
-}
-async function fetchBibleChapter(version, abbrev, chapter){
-  const key = `${version}|${abbrev}|${chapter}`;
-  if(bibleChapterCache[key]) return bibleChapterCache[key];
-  const res = await fetch(`${BIBLE_API}/verses/${version}/${abbrev}/${chapter}`, {headers: bibleHeaders()});
-  if(!res.ok) throw new Error('status '+res.status);
-  const data = await res.json();
-  bibleChapterCache[key] = data;
+  bibleBookCache[key] = data;
+  try{ localStorage.setItem(lsKey, JSON.stringify(data)); }catch(e){ /* quota cheia, tudo bem, fica só em memória */ }
   return data;
 }
 
@@ -688,19 +744,7 @@ function renderView(){
 /* =========================================================
    BIBLE MODULE
    ========================================================= */
-async function renderBibleLeft(container){
-  container.innerHTML = '<div class="empty-hint">Carregando lista de livros...</div>';
-  let books;
-  try{
-    books = await ensureBibleBooks();
-  }catch(err){
-    container.innerHTML = '<div class="empty-hint">Não consegui carregar os livros da Bíblia (verifique a internet).<br><br><button class="btn ghost sm" id="retry-books">Tentar de novo</button></div>';
-    const retryBtn=container.querySelector('#retry-books');
-    if(retryBtn) retryBtn.addEventListener('click',()=>renderBibleLeft(container));
-    return;
-  }
-  if(AppState.view!=='bible') return; // usuário já saiu da aba enquanto carregava
-  container.innerHTML='';
+function renderBibleLeft(container){
   const wrap=document.createElement('div');
   wrap.innerHTML = `
     <div id="bible-search-box">
@@ -710,34 +754,22 @@ async function renderBibleLeft(container){
       <label>Versão</label>
       <select id="bible-version-select">${bibleVersions.map(v=>`<option value="${v.id}" ${AppState.bible.version===v.id?'selected':''}>${v.label}</option>`).join('')}</select>
     </div>
-    <div class="book-cat-legend" id="cat-legend"></div>
+    <div class="book-cat-legend">${[...new Set(bibleBookList.map(b=>b.group))].map(g=>`<span><span class="legend-dot" style="background:${colorForGroup(g)}"></span>${g}</span>`).join('')}</div>
     <div id="book-grid"></div>
     <div id="search-results" style="margin-top:10px;"></div>
-    <details style="margin-top:14px;">
-      <summary style="font-size:11px;color:var(--text-dim);cursor:pointer;">Token da API (opcional, remove limite de 20 buscas/hora)</summary>
-      <div class="field" style="margin-top:8px;">
-        <input type="text" id="bible-token-input" placeholder="Cole seu token aqui" value="${getBibleToken()}">
-      </div>
-      <button class="btn ghost sm" id="save-bible-token">Salvar token</button>
-      <p style="font-size:10px;color:var(--text-dim);margin-top:6px;">Crie grátis em abibliadigital.com.br (cria uma conta simples, sem custo).</p>
-    </details>
   `;
   container.appendChild(wrap);
 
-  const groupsSeen = [...new Set(books.map(b=>b.group))];
-  wrap.querySelector('#cat-legend').innerHTML = groupsSeen.map(g=>`<span><span class="legend-dot" style="background:${colorForGroup(g)}"></span>${g}</span>`).join('');
-
   const grid=wrap.querySelector('#book-grid');
-  books.forEach(b=>{
-    const abbrev=b.abbrev.pt;
+  bibleBookList.forEach(b=>{
     const chip=document.createElement('div');
     chip.className='book-chip has-data';
     chip.style.background=colorForGroup(b.group);
-    chip.textContent=abbrev;
+    chip.textContent=b.short;
     chip.title=b.name;
     chip.addEventListener('click',()=>{
-      AppState.bible.book={abbrev, name:b.name, chapters:b.chapters};
-      AppState.bible.chapter=null; AppState.bible.verse=null;
+      AppState.bible.book={id:b.id, name:b.name};
+      AppState.bible.chapter=null;
       renderView();
     });
     grid.appendChild(chip);
@@ -751,50 +783,50 @@ async function renderBibleLeft(container){
   wrap.querySelector('#bible-search-input').addEventListener('input', debounce(e=>{
     doBibleSearch(e.target.value, wrap.querySelector('#search-results'));
   }, 500));
-
-  wrap.querySelector('#save-bible-token').addEventListener('click',()=>{
-    const val = wrap.querySelector('#bible-token-input').value.trim();
-    localStorage.setItem('abibliadigital_token', val);
-    toast(val? 'Token salvo!' : 'Token removido.');
-  });
 }
 
 async function doBibleSearch(term, resultsEl){
   if(!term || term.trim().length<3){ resultsEl.innerHTML=''; return; }
-  resultsEl.innerHTML='<div class="empty-hint">Buscando...</div>';
+  resultsEl.innerHTML='<div class="empty-hint">Buscando... (a primeira busca baixa a Bíblia inteira e pode levar alguns segundos; as próximas são instantâneas)</div>';
+  const version = AppState.bible.version;
   try{
-    const res = await fetch(`${BIBLE_API}/verses/search`, {
-      method:'POST',
-      headers: bibleHeaders({'Content-Type':'application/json'}),
-      body: JSON.stringify({version: AppState.bible.version, search: term})
-    });
-    if(!res.ok) throw new Error('status '+res.status);
-    const data = await res.json();
-    resultsEl.innerHTML='';
-    if(!data.verses || data.verses.length===0){
-      resultsEl.innerHTML='<div class="empty-hint">Nenhum resultado encontrado</div>';
-      return;
+    const allBooks = await Promise.all(bibleBookList.map(b=>
+      fetchBibleBook(version,b.id).then(data=>({meta:b,data})).catch(()=>null)
+    ));
+    const t=term.toLowerCase();
+    const results=[];
+    for(const entry of allBooks){
+      if(!entry) continue;
+      const {meta,data}=entry;
+      for(let cIdx=0; cIdx<data.chapters.length; cIdx++){
+        const verses=data.chapters[cIdx];
+        for(let vIdx=0; vIdx<verses.length; vIdx++){
+          if(results.length>=30) break;
+          const v=verses[vIdx];
+          if(v.toLowerCase().includes(t)){
+            results.push({book:meta, chapter:cIdx+1, verseNum:vIdx+1, text:v});
+          }
+        }
+        if(results.length>=30) break;
+      }
+      if(results.length>=30) break;
     }
-    data.verses.slice(0,25).forEach(v=>{
+    resultsEl.innerHTML='';
+    if(results.length===0){ resultsEl.innerHTML='<div class="empty-hint">Nenhum resultado encontrado</div>'; return; }
+    results.forEach(r=>{
       const div=document.createElement('div');
       div.className='search-result';
-      let highlighted=v.text;
-      try{ highlighted = v.text.replace(new RegExp(term,'ig'), m=>`<b>${m}</b>`); }catch(e){}
-      div.innerHTML=`<b style="color:var(--accent)">${v.book.name} ${v.chapter}:${v.number}</b><br>${highlighted}`;
+      let highlighted=r.text;
+      try{ highlighted=r.text.replace(new RegExp(term,'ig'), m=>`<b>${m}</b>`); }catch(e){}
+      div.innerHTML=`<b style="color:var(--accent)">${r.book.name} ${r.chapter}:${r.verseNum}</b><br>${highlighted}`;
       div.addEventListener('click',()=>{
-        const cached=(bibleBooksCache||[]).find(b=>b.abbrev.pt===v.book.abbrev.pt);
-        AppState.bible.book={abbrev:v.book.abbrev.pt, name:v.book.name, chapters:cached?cached.chapters:(v.chapter+5)};
-        AppState.bible.chapter=v.chapter;
+        AppState.bible.book={id:r.book.id, name:r.book.name};
+        AppState.bible.chapter=r.chapter;
         renderView();
-        setTimeout(()=>{ setPreviewFromBible(v.book.name, v.chapter, v.number, v.text); }, 350);
+        setTimeout(()=>{ setPreviewFromBible(r.book.name, r.chapter, r.verseNum, r.text); }, 300);
       });
       resultsEl.appendChild(div);
     });
-    if(data.occurrence>25){
-      const more=document.createElement('div'); more.className='empty-hint';
-      more.textContent=`+ ${data.occurrence-25} outros resultados — refine a busca`;
-      resultsEl.appendChild(more);
-    }
   }catch(err){
     resultsEl.innerHTML='<div class="empty-hint">Erro na busca (verifique a internet)</div>';
   }
@@ -819,46 +851,53 @@ async function renderBibleCenter(container){
     container.appendChild(hint);
     return;
   }
-  if(!chapter){
+
+  const loading=document.createElement('div');
+  loading.className='empty-hint';
+  loading.textContent='Carregando livro...';
+  container.appendChild(loading);
+  const bookIdAtCall=book.id, versionAtCall=AppState.bible.version, chapterAtCall=chapter;
+  let bookData;
+  try{
+    bookData = await fetchBibleBook(versionAtCall, bookIdAtCall);
+  }catch(err){
+    loading.textContent='Não consegui carregar este livro (verifique a internet ou tente outra versão).';
+    return;
+  }
+  const stillSame = AppState.view==='bible' && AppState.bible.book && AppState.bible.book.id===bookIdAtCall && AppState.bible.version===versionAtCall && AppState.bible.chapter===chapterAtCall;
+  if(!stillSame) return;
+  loading.remove();
+
+  if(!chapterAtCall){
     const grid=document.createElement('div');
     grid.className='chapter-grid';
-    for(let c=1;c<=book.chapters;c++){
+    bookData.chapters.forEach((_,idx)=>{
+      const c=idx+1;
       const cell=document.createElement('div');
       cell.className='grid-cell';
       cell.textContent=c;
       cell.addEventListener('click',()=>{AppState.bible.chapter=c; renderView();});
       grid.appendChild(cell);
-    }
+    });
     container.appendChild(grid);
     return;
   }
 
-  const loading=document.createElement('div');
-  loading.className='empty-hint';
-  loading.textContent='Carregando capítulo...';
-  container.appendChild(loading);
-  const abbrevAtCall=book.abbrev, chapterAtCall=chapter, versionAtCall=AppState.bible.version;
-  try{
-    const data = await fetchBibleChapter(versionAtCall, abbrevAtCall, chapterAtCall);
-    const stillSame = AppState.view==='bible' && AppState.bible.book && AppState.bible.book.abbrev===abbrevAtCall && AppState.bible.chapter===chapterAtCall && AppState.bible.version===versionAtCall;
-    if(!stillSame) return;
-    loading.remove();
-    const reader=document.createElement('div');
-    reader.id='verse-reader';
-    data.verses.forEach(v=>{
-      const line=document.createElement('div');
-      line.className='verse-line';
-      line.innerHTML=`<span class="verse-num">${v.number}</span>${v.text}`;
-      line.addEventListener('click',()=>{
-        setPreviewFromBible(book.name, chapter, v.number, v.text);
-        toast(`Enviado ao preview: ${book.name} ${chapter}:${v.number}`);
-      });
-      reader.appendChild(line);
+  const verses = bookData.chapters[chapterAtCall-1] || [];
+  const reader=document.createElement('div');
+  reader.id='verse-reader';
+  verses.forEach((v,i)=>{
+    const num=i+1;
+    const line=document.createElement('div');
+    line.className='verse-line';
+    line.innerHTML=`<span class="verse-num">${num}</span>${v}`;
+    line.addEventListener('click',()=>{
+      setPreviewFromBible(book.name, chapterAtCall, num, v);
+      toast(`Enviado ao preview: ${book.name} ${chapterAtCall}:${num}`);
     });
-    container.appendChild(reader);
-  }catch(err){
-    loading.textContent='Não consegui carregar este capítulo (verifique a internet ou tente outra versão).';
-  }
+    reader.appendChild(line);
+  });
+  container.appendChild(reader);
 }
 
 function setPreviewFromBible(bookName,chapter,verseNumber,text){
@@ -873,7 +912,6 @@ function setPreviewFromBible(bookName,chapter,verseNumber,text){
 
 /* =========================================================
    SONGS MODULE
-   ========================================================= */
 function renderSongsLeft(container){
   const wrap=document.createElement('div');
   wrap.innerHTML=`<button class="btn accent sm" id="new-song-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Nova música</button>
