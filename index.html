@@ -349,6 +349,7 @@ body.display-mode #display-live-dot{display:flex;}
         <video id="preview-bg-video" muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;"></video>
         <div id="preview-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
         <div class="preview-text" id="preview-text-el">Selecione um slide</div>
+        <img id="preview-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
       </div>
       <div class="transport">
         <button id="tr-prev" title="Slide anterior (←)"><i class="fa-solid fa-backward-step"></i></button>
@@ -361,6 +362,12 @@ body.display-mode #display-live-dot{display:flex;}
         <select id="theme-select" style="width:100%;"></select>
         <button class="btn ghost sm" id="theme-edit-btn" title="Editar este tema" style="margin-top:6px;width:100%;"><i class="fa-solid fa-pen"></i> Editar tema</button>
       </div>
+      <div style="margin-top:14px;">
+        <div class="panel-header" style="padding:0 0 8px 0;border:none;">Mídia (dízimo/avisos)</div>
+        <button class="btn ghost sm" id="media-upload-btn" style="width:100%;margin-bottom:8px;"><i class="fa-solid fa-plus"></i> Adicionar imagem</button>
+        <input type="file" id="media-file-input" accept="image/*" class="hidden" multiple>
+        <div id="media-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;"></div>
+      </div>
     </div>
   </div>
 
@@ -372,6 +379,7 @@ body.display-mode #display-live-dot{display:flex;}
   <video id="projection-bg-video" muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;"></video>
   <div id="projection-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
   <div id="projection-text">Aguardando...</div>
+  <img id="projection-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
   <div id="projection-exit-hint">ESC para sair • F tela cheia • ← → slides</div>
 </div>
 
@@ -414,6 +422,7 @@ const db = getFirestore(fbApp);
 const songsDocRef = doc(db,'holyrics_data','songs');
 const themesDocRef = doc(db,'holyrics_data','themes');
 const playlistsDocRef = doc(db,'holyrics_data','playlists');
+const mediaDocRef = doc(db,'holyrics_data','media');
 const liveDocRef = doc(db,'holyrics_data','live');
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -447,12 +456,13 @@ async function doCloudSave(){
       setDoc(songsDocRef, {list: AppState.songs}),
       setDoc(themesDocRef, {list: AppState.themes, activeThemeId: AppState.activeThemeId||''}),
       setDoc(playlistsDocRef, {list: AppState.playlists}),
+      setDoc(mediaDocRef, {list: AppState.media}),
     ]);
     updateSyncStatus('synced');
   }catch(err){
     console.error('Erro salvando no Firestore:', err);
     updateSyncStatus('error');
-    toast('Não consegui salvar na nuvem (conexão ou arquivo de tema muito grande).');
+    toast('Não consegui salvar na nuvem (conexão ou arquivo muito grande).');
   }
 }
 
@@ -468,6 +478,7 @@ function pushLiveState(){
       textHidden: !!AppState.textHidden,
       themeId: AppState.activeThemeId || null,
       overrideText: AppState.previewOverride ? AppState.previewOverride.text : null,
+      activeMediaId: AppState.activeMediaId || null,
       updatedAt: Date.now(),
     }).catch(err=>console.error('Erro ao enviar estado ao vivo:', err));
   }, 120);
@@ -491,6 +502,7 @@ async function initTvMode(){
     }
     applyLiveToPreview();
   });
+  onSnapshot(mediaDocRef, snap=>{ if(snap.exists() && Array.isArray(snap.data().list)) AppState.media = snap.data().list; applyLiveToPreview(); });
   onSnapshot(liveDocRef, snap=>{
     if(!snap.exists()) return;
     const d = snap.data();
@@ -500,6 +512,7 @@ async function initTvMode(){
     AppState.textHidden = !!d.textHidden;
     AppState.activeThemeId = d.themeId || AppState.activeThemeId;
     AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
+    AppState.activeMediaId = d.activeMediaId || null;
     applyLiveToPreview();
   });
 
@@ -517,15 +530,16 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef), getDoc(playlistsDocRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef), getDoc(playlistsDocRef), getDoc(mediaDocRef)]);
     if(songsSnap.exists() && Array.isArray(songsSnap.data().list)) AppState.songs = songsSnap.data().list;
     if(themesSnap.exists() && Array.isArray(themesSnap.data().list) && themesSnap.data().list.length){
       AppState.themes = themesSnap.data().list;
       AppState.activeThemeId = themesSnap.data().activeThemeId || AppState.themes[0].id;
     }
     if(plSnap.exists() && Array.isArray(plSnap.data().list)) AppState.playlists = plSnap.data().list;
+    if(mediaSnap.exists() && Array.isArray(mediaSnap.data().list)) AppState.media = mediaSnap.data().list;
     seedDefaultSongs();
-    renderView(); updatePreview();
+    renderView(); renderMediaPanel(); updatePreview();
     updateSyncStatus('synced');
   }catch(err){
     console.warn('Sem conexão com o Firestore, usando cache local.', err);
@@ -555,6 +569,13 @@ async function initCloudSync(){
       if(AppState.view==='playlist') renderView();
     }
   });
+  onSnapshot(mediaDocRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    if(snap.exists() && Array.isArray(snap.data().list)){
+      AppState.media = snap.data().list;
+      renderMediaPanel();
+    }
+  });
 }
 
 /* =========================================================
@@ -572,6 +593,8 @@ const AppState = {
   activeThemeId: null,
   blackout: false,
   textHidden: false,
+  media: [],
+  activeMediaId: null,
 };
 
 function saveState(){
@@ -580,6 +603,7 @@ function saveState(){
   localStorage.setItem('holyrics_themes', JSON.stringify(AppState.themes));
   localStorage.setItem('holyrics_playlists', JSON.stringify(AppState.playlists));
   localStorage.setItem('holyrics_active_theme', AppState.activeThemeId || '');
+  try{ localStorage.setItem('holyrics_media', JSON.stringify(AppState.media)); }catch(e){}
   // sincroniza com o Firestore (debounced)
   scheduleCloudSave();
 }
@@ -588,6 +612,7 @@ function loadState(){
   AppState.themes = JSON.parse(localStorage.getItem('holyrics_themes') || '[]');
   AppState.playlists = JSON.parse(localStorage.getItem('holyrics_playlists') || '[]');
   AppState.activeThemeId = localStorage.getItem('holyrics_active_theme') || null;
+  AppState.media = JSON.parse(localStorage.getItem('holyrics_media') || '[]');
   if(AppState.themes.length===0){
     AppState.themes.push(defaultTheme());
     AppState.activeThemeId = AppState.themes[0].id;
@@ -1165,7 +1190,7 @@ function renderThemesCenter(container){
     const t=q('#th-bg-type').value;
     q('#th-bg-color').classList.toggle('hidden', t!=='color');
     q('#th-bg-upload-btn').classList.toggle('hidden', t!=='image' && t!=='video');
-    q('#th-bg-upload-btn').textContent = t==='video' ? ' Escolher vídeo' : ' Escolher imagem';
+    q('#th-bg-upload-btn').innerHTML = t==='video' ? '<i class="fa-solid fa-video"></i> Escolher vídeo' : '<i class="fa-solid fa-image"></i> Escolher imagem';
   };
   syncBgControls();
   q('#th-bg-type').addEventListener('change',e=>{
@@ -1211,6 +1236,40 @@ function renderThemesCenter(container){
     AppState.editingThemeId=null; apply();
   });
 }
+function renderMediaPanel(){
+  const grid=document.getElementById('media-grid');
+  if(!grid) return;
+  grid.innerHTML='';
+  AppState.media.forEach(m=>{
+    const thumb=document.createElement('div');
+    thumb.style.cssText='position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid '+(AppState.activeMediaId===m.id?'var(--accent)':'transparent');
+    thumb.innerHTML=`<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;">
+      <button style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:4px;width:16px;height:16px;font-size:9px;color:#fff;" title="Remover">✕</button>`;
+    thumb.querySelector('img').addEventListener('click',()=>{
+      AppState.activeMediaId = AppState.activeMediaId===m.id ? null : m.id;
+      saveState(); renderMediaPanel(); updatePreview();
+    });
+    thumb.querySelector('button').addEventListener('click',(e)=>{
+      e.stopPropagation();
+      AppState.media = AppState.media.filter(x=>x.id!==m.id);
+      if(AppState.activeMediaId===m.id) AppState.activeMediaId=null;
+      saveState(); renderMediaPanel(); updatePreview();
+    });
+    grid.appendChild(thumb);
+  });
+}
+document.getElementById('media-upload-btn').addEventListener('click',()=>document.getElementById('media-file-input').click());
+document.getElementById('media-file-input').addEventListener('change',(e)=>{
+  [...e.target.files].forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      AppState.media.push({id:uid(), name:file.name, dataUrl:ev.target.result});
+      saveState(); renderMediaPanel();
+    };
+    reader.readAsDataURL(file);
+  });
+});
+
 function renderThemeSelect(){
   const sel=document.getElementById('theme-select');
   sel.innerHTML='';
@@ -1337,9 +1396,11 @@ function nextSlideText(){
 
 function applyBackground(bgEl, videoEl, dimEl, theme, blackout){
   if(videoEl){
+    videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
     if(!blackout && theme.background.type==='video' && theme.background.value){
       if(videoEl.getAttribute('src')!==theme.background.value) videoEl.src=theme.background.value;
-      videoEl.style.display='block'; videoEl.play().catch(()=>{});
+      videoEl.style.display='block';
+      if(videoEl.paused) videoEl.play().catch(()=>{});
     } else {
       videoEl.pause(); videoEl.style.display='none';
     }
@@ -1404,6 +1465,13 @@ function updatePreview(){
   setSlideText(projText, hide ? '' : text, theme);
   applyThemeToEl(projText,null,theme);
   applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout);
+
+  const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
+  [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
+    const img=document.getElementById(id);
+    if(activeMedia){ img.src=activeMedia.dataUrl; img.style.display='block'; }
+    else { img.style.display='none'; }
+  });
 
   // stage view
   const stageCur=document.getElementById('stage-current');
@@ -1523,6 +1591,7 @@ if(isTvMode){
 } else {
   seedDefaultSongs();
   renderView();
+  renderMediaPanel();
   updatePreview();
   initCloudSync();    // celular/computador de operação: edita e controla
 }
