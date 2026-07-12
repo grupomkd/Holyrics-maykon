@@ -357,6 +357,7 @@ body.display-mode #display-live-dot{display:flex;}
         <button id="tr-hidetext" title="Só fundo (esconder letra)"><i class="fa-solid fa-eye-slash"></i></button>
         <button id="tr-next" title="Próximo slide (→)"><i class="fa-solid fa-forward-step"></i></button>
       </div>
+      <div id="slide-strip" style="display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:4px;"></div>
       <div style="margin-top:14px;">
         <div class="panel-header" style="padding:0 0 8px 0;border:none;">Tema aplicado</div>
         <select id="theme-select" style="width:100%;"></select>
@@ -405,7 +406,7 @@ body.display-mode #display-live-dot{display:flex;}
    FIREBASE (Firestore) — sincronização em nuvem
    ========================================================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDut6pM1ajgL8n-zjQCgEdqzLsj2IKgKtI",
@@ -421,8 +422,11 @@ const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 const songsDocRef = doc(db,'holyrics_data','songs');
 const themesDocRef = doc(db,'holyrics_data','themes');
+const themesCollRef = collection(db,'holyrics_themes');
 const playlistsDocRef = doc(db,'holyrics_data','playlists');
 const mediaDocRef = doc(db,'holyrics_data','media');
+const mediaCollRef = collection(db,'holyrics_media');
+const metaDocRef = doc(db,'holyrics_data','meta');
 const liveDocRef = doc(db,'holyrics_data','live');
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -454,17 +458,38 @@ async function doCloudSave(){
   try{
     await Promise.all([
       setDoc(songsDocRef, {list: AppState.songs}),
-      setDoc(themesDocRef, {list: AppState.themes, activeThemeId: AppState.activeThemeId||''}),
       setDoc(playlistsDocRef, {list: AppState.playlists}),
-      setDoc(mediaDocRef, {list: AppState.media}),
+      setDoc(metaDocRef, {activeThemeId: AppState.activeThemeId||''}),
     ]);
     updateSyncStatus('synced');
   }catch(err){
     console.error('Erro salvando no Firestore:', err);
     updateSyncStatus('error');
-    toast('Não consegui salvar na nuvem (conexão ou arquivo muito grande).');
+    toast('Não consegui salvar na nuvem (conexão).');
   }
 }
+let themeSaveTimer=null;
+function saveThemeCloud(theme){
+  clearTimeout(themeSaveTimer);
+  updateSyncStatus('saving');
+  themeSaveTimer=setTimeout(()=>{
+    setDoc(doc(themesCollRef, theme.id), theme).then(()=>updateSyncStatus('synced')).catch(err=>{
+      console.error('Erro salvando tema:', err);
+      updateSyncStatus('error');
+      toast('Tema muito grande pra sincronizar (vídeo/imagem grande). Funciona só neste aparelho.');
+    });
+  }, 500);
+}
+function deleteThemeCloud(id){ deleteDoc(doc(themesCollRef, id)).catch(()=>{}); }
+function saveMediaCloud(item){
+  updateSyncStatus('saving');
+  setDoc(doc(mediaCollRef, item.id), item).then(()=>updateSyncStatus('synced')).catch(err=>{
+    console.error('Erro salvando mídia:', err);
+    updateSyncStatus('error');
+    toast('Imagem muito grande pra sincronizar. Funciona só neste aparelho.');
+  });
+}
+function deleteMediaCloud(id){ deleteDoc(doc(mediaCollRef, id)).catch(()=>{}); }
 
 let liveSaveTimer=null;
 function pushLiveState(){
@@ -487,22 +512,17 @@ function pushLiveState(){
 async function initTvMode(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef)]);
+    const [songsSnap, themesSnap, mediaSnap, metaSnap] = await Promise.all([getDoc(songsDocRef), getDocs(themesCollRef), getDocs(mediaCollRef), getDoc(metaDocRef)]);
     if(songsSnap.exists() && Array.isArray(songsSnap.data().list)) AppState.songs = songsSnap.data().list;
-    if(themesSnap.exists() && Array.isArray(themesSnap.data().list) && themesSnap.data().list.length){
-      AppState.themes = themesSnap.data().list;
-      AppState.activeThemeId = themesSnap.data().activeThemeId || AppState.themes[0].id;
-    }
+    if(!themesSnap.empty){ AppState.themes = themesSnap.docs.map(d=>d.data()); }
+    if(!mediaSnap.empty){ AppState.media = mediaSnap.docs.map(d=>d.data()); }
+    if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
+    else if(AppState.themes[0]) AppState.activeThemeId = AppState.themes[0].id;
   }catch(err){ console.warn('TV: sem conexão inicial, aguardando dados ao vivo.', err); }
 
   onSnapshot(songsDocRef, snap=>{ if(snap.exists() && Array.isArray(snap.data().list)) AppState.songs = snap.data().list; applyLiveToPreview(); });
-  onSnapshot(themesDocRef, snap=>{
-    if(snap.exists() && Array.isArray(snap.data().list) && snap.data().list.length){
-      AppState.themes = snap.data().list;
-    }
-    applyLiveToPreview();
-  });
-  onSnapshot(mediaDocRef, snap=>{ if(snap.exists() && Array.isArray(snap.data().list)) AppState.media = snap.data().list; applyLiveToPreview(); });
+  onSnapshot(themesCollRef, snap=>{ if(!snap.empty) AppState.themes = snap.docs.map(d=>d.data()); applyLiveToPreview(); });
+  onSnapshot(mediaCollRef, snap=>{ AppState.media = snap.docs.map(d=>d.data()); applyLiveToPreview(); });
   onSnapshot(liveDocRef, snap=>{
     if(!snap.exists()) return;
     const d = snap.data();
@@ -530,14 +550,13 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef), getDoc(playlistsDocRef), getDoc(mediaDocRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap] = await Promise.all([getDoc(songsDocRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef)]);
     if(songsSnap.exists() && Array.isArray(songsSnap.data().list)) AppState.songs = songsSnap.data().list;
-    if(themesSnap.exists() && Array.isArray(themesSnap.data().list) && themesSnap.data().list.length){
-      AppState.themes = themesSnap.data().list;
-      AppState.activeThemeId = themesSnap.data().activeThemeId || AppState.themes[0].id;
-    }
+    if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
+    if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
+    if(!AppState.themes.find(t=>t.id===AppState.activeThemeId) && AppState.themes[0]) AppState.activeThemeId = AppState.themes[0].id;
     if(plSnap.exists() && Array.isArray(plSnap.data().list)) AppState.playlists = plSnap.data().list;
-    if(mediaSnap.exists() && Array.isArray(mediaSnap.data().list)) AppState.media = mediaSnap.data().list;
+    if(!mediaSnap.empty) AppState.media = mediaSnap.docs.map(d=>d.data());
     seedDefaultSongs();
     renderView(); renderMediaPanel(); updatePreview();
     updateSyncStatus('synced');
@@ -553,11 +572,10 @@ async function initCloudSync(){
       updatePreview();
     }
   });
-  onSnapshot(themesDocRef, {includeMetadataChanges:true}, snap=>{
+  onSnapshot(themesCollRef, {includeMetadataChanges:true}, snap=>{
     if(snap.metadata.hasPendingWrites) return;
-    if(snap.exists() && Array.isArray(snap.data().list) && snap.data().list.length){
-      AppState.themes = snap.data().list;
-      if(snap.data().activeThemeId) AppState.activeThemeId = snap.data().activeThemeId;
+    if(!snap.empty){
+      AppState.themes = snap.docs.map(d=>d.data());
       if(AppState.view==='themes') renderView();
       renderThemeSelect(); updatePreview();
     }
@@ -569,12 +587,10 @@ async function initCloudSync(){
       if(AppState.view==='playlist') renderView();
     }
   });
-  onSnapshot(mediaDocRef, {includeMetadataChanges:true}, snap=>{
+  onSnapshot(mediaCollRef, {includeMetadataChanges:true}, snap=>{
     if(snap.metadata.hasPendingWrites) return;
-    if(snap.exists() && Array.isArray(snap.data().list)){
-      AppState.media = snap.data().list;
-      renderMediaPanel();
-    }
+    AppState.media = snap.docs.map(d=>d.data());
+    renderMediaPanel();
   });
 }
 
@@ -883,6 +899,14 @@ async function doBibleSearch(term, resultsEl){
 
 async function renderBibleCenter(container){
   const {book,chapter}=AppState.bible;
+  if(AppState.previewOverride && AppState.previewOverride.type==='bible'){
+    const exitBtn=document.createElement('button');
+    exitBtn.className='btn accent sm';
+    exitBtn.style.marginBottom='10px';
+    exitBtn.innerHTML='<i class="fa-solid fa-xmark"></i> Sair (tirar versículo da tela)';
+    exitBtn.addEventListener('click',()=>{ AppState.previewOverride=null; updatePreview(); renderView(); });
+    container.appendChild(exitBtn);
+  }
   const crumb=document.createElement('div');
   crumb.className='crumb';
   crumb.innerHTML = `<span id="crumb-books">Livros</span>` +
@@ -970,7 +994,7 @@ function renderSongsLeft(container){
   container.appendChild(wrap);
   wrap.querySelector('#new-song-btn').addEventListener('click',()=>{
     const s={id:uid(),title:'Nova música',artist:'',notes:'',lyrics:'',slides:[],themeId:null,history:[],createdAt:Date.now()};
-    AppState.songs.unshift(s); AppState.currentSongId=s.id; saveState(); renderView();
+    AppState.songs.unshift(s); AppState.currentSongId=s.id; AppState.previewOverride=null; saveState(); renderView(); updatePreview();
   });
   wrap.querySelector('#song-search').addEventListener('input',e=>renderSongList(wrap.querySelector('#song-list'),e.target.value));
   renderSongList(wrap.querySelector('#song-list'),'');
@@ -984,7 +1008,7 @@ function renderSongList(el,filter){
     const item=document.createElement('div');
     item.className='song-item'+(AppState.currentSongId===s.id?' selected':'');
     item.innerHTML=`<div class="t">${s.title||'(sem título)'}</div><div class="a">${s.artist||'—'} · ${s.slides.length} slides</div>`;
-    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; renderView();});
+    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; renderView(); updatePreview();});
     el.appendChild(item);
   });
 }
@@ -1057,7 +1081,7 @@ function renderSongsCenter(container){
     }, 400);
     textarea.addEventListener('input', ()=>{ autoResize(); debouncedSave(); });
     textarea.addEventListener('focus', ()=>{
-      AppState.currentSlideIndex=idx; updatePreview();
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
     });
     textarea.addEventListener('blur', ()=>{
       slide.text = textarea.value; saveState(); updatePreview();
@@ -1065,7 +1089,7 @@ function renderSongsCenter(container){
     card.addEventListener('click',(e)=>{
       if(e.target.closest('.slide-actions')) return;
       if(e.target.closest('.slide-content')) return; // deixa o clique focar o textarea sem re-renderizar
-      AppState.currentSlideIndex=idx; updatePreview();
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
     });
     card.querySelector('.dup-btn').addEventListener('click',(e)=>{
       e.stopPropagation();
@@ -1110,7 +1134,7 @@ function renderThemesLeft(container){
   container.appendChild(wrap);
   wrap.querySelector('#new-theme-btn').addEventListener('click',()=>{
     const t=defaultTheme(); t.name='Novo tema';
-    AppState.themes.push(t); AppState.editingThemeId=t.id; saveState(); renderView();
+    AppState.themes.push(t); AppState.editingThemeId=t.id; saveState(); saveThemeCloud(t); renderView();
   });
   const listEl=wrap.querySelector('#theme-list');
   AppState.themes.forEach(t=>{
@@ -1183,8 +1207,8 @@ function renderThemesCenter(container){
   `;
   container.appendChild(wrap);
   const q=(sel)=>wrap.querySelector(sel);
-  const apply=()=>{ saveState(); renderView(); updatePreview(); };
-  q('#th-name').addEventListener('input',e=>{theme.name=e.target.value; saveState();});
+  const apply=()=>{ saveState(); saveThemeCloud(theme); renderView(); updatePreview(); };
+  q('#th-name').addEventListener('input',e=>{theme.name=e.target.value; saveState(); saveThemeCloud(theme);});
   q('#th-bg-type').value = theme.background.type;
   const syncBgControls=()=>{
     const t=q('#th-bg-type').value;
@@ -1221,7 +1245,7 @@ function renderThemesCenter(container){
   q('#th-align').value=theme.alignment;
   q('#th-align').addEventListener('change',e=>{theme.alignment=e.target.value; apply();});
   q('#th-transition').value=theme.transition||'fade';
-  q('#th-transition').addEventListener('change',e=>{theme.transition=e.target.value; saveState();});
+  q('#th-transition').addEventListener('change',e=>{theme.transition=e.target.value; saveState(); saveThemeCloud(theme);});
   q('#th-lh').addEventListener('input',e=>{theme.lineHeight=Number(e.target.value); apply();});
   q('#th-bold').addEventListener('change',e=>{theme.font.bold=e.target.checked; apply();});
   q('#th-italic').addEventListener('change',e=>{theme.font.italic=e.target.checked; apply();});
@@ -1231,6 +1255,7 @@ function renderThemesCenter(container){
   q('#th-delete-btn').addEventListener('click',()=>{
     if(AppState.themes.length<=1){ toast('Mantenha ao menos um tema.'); return; }
     if(!confirm('Excluir este tema?')) return;
+    deleteThemeCloud(theme.id);
     AppState.themes=AppState.themes.filter(t=>t.id!==theme.id);
     if(AppState.activeThemeId===theme.id) AppState.activeThemeId=AppState.themes[0].id;
     AppState.editingThemeId=null; apply();
@@ -1251,6 +1276,7 @@ function renderMediaPanel(){
     });
     thumb.querySelector('button').addEventListener('click',(e)=>{
       e.stopPropagation();
+      deleteMediaCloud(m.id);
       AppState.media = AppState.media.filter(x=>x.id!==m.id);
       if(AppState.activeMediaId===m.id) AppState.activeMediaId=null;
       saveState(); renderMediaPanel(); updatePreview();
@@ -1263,8 +1289,9 @@ document.getElementById('media-file-input').addEventListener('change',(e)=>{
   [...e.target.files].forEach(file=>{
     const reader=new FileReader();
     reader.onload=ev=>{
-      AppState.media.push({id:uid(), name:file.name, dataUrl:ev.target.result});
-      saveState(); renderMediaPanel();
+      const item={id:uid(), name:file.name, dataUrl:ev.target.result};
+      AppState.media.push(item);
+      saveState(); saveMediaCloud(item); renderMediaPanel();
     };
     reader.readAsDataURL(file);
   });
@@ -1448,6 +1475,25 @@ function setSlideText(el, text, theme){
   });
 }
 
+function renderSlideStrip(){
+  const strip=document.getElementById('slide-strip');
+  if(!strip) return;
+  const song=currentSong();
+  strip.innerHTML='';
+  if(!song || !song.slides.length) return;
+  song.slides.forEach((slide,i)=>{
+    const chip=document.createElement('div');
+    chip.textContent=i+1;
+    chip.title=slide.text.slice(0,40);
+    chip.style.cssText='flex:0 0 30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:12px;background:'+(i===AppState.currentSlideIndex?'var(--accent)':'var(--surface-2)')+';border:1px solid var(--border);';
+    chip.addEventListener('click',()=>{
+      AppState.currentSlideIndex=i; AppState.previewOverride=null; updatePreview();
+      if(AppState.view==='songs') renderView();
+    });
+    strip.appendChild(chip);
+  });
+}
+
 function updatePreview(){
   const theme=getActiveTheme();
   const hide = AppState.blackout || AppState.textHidden;
@@ -1483,6 +1529,7 @@ function updatePreview(){
 
   // update slide list highlight without full rerender (cheap)
   document.querySelectorAll('.slide-card').forEach((c,i)=>c.classList.toggle('current', Number(c.dataset.idx)===AppState.currentSlideIndex));
+  renderSlideStrip();
 
   pushLiveState();
 }
@@ -1532,6 +1579,14 @@ document.addEventListener('keydown',(e)=>{
   else if(e.key==='ArrowLeft'){ goPrevSlide(); }
   else if(e.key==='b' || e.key==='B'){ AppState.blackout=!AppState.blackout; updatePreview(); }
   else if(e.key==='h' || e.key==='H'){ AppState.textHidden=!AppState.textHidden; updatePreview(); }
+  else if(e.key>='1' && e.key<='9'){
+    const song=currentSong();
+    const idx=Number(e.key)-1;
+    if(song && song.slides[idx]){
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
+      if(AppState.view==='songs') renderView();
+    }
+  }
   else if(e.key==='f' || e.key==='F'){
     const overlay=document.getElementById('projection-overlay');
     if(overlay.classList.contains('show')){
