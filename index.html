@@ -245,6 +245,28 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
   transition:opacity .2s;pointer-events:none;
 }
 .toast.show{opacity:1;}
+
+/* ===== MODO TV (display remoto) ===== */
+body.display-mode #topbar,
+body.display-mode #main{ display:none !important; }
+#display-start{
+  position:fixed;inset:0;background:#0a0a14;color:#fff;z-index:20000;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  text-align:center;padding:20px;
+}
+#display-start.show{display:flex;}
+#display-start button{
+  background:var(--accent);color:#fff;padding:18px 34px;border-radius:12px;
+  font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px;
+}
+#display-start button:hover{background:var(--accent-2);}
+#display-start p{color:var(--text-dim);font-size:14px;max-width:420px;}
+#display-live-dot{
+  position:fixed;bottom:14px;left:14px;z-index:20001;font-size:11px;color:rgba(255,255,255,.35);
+  display:none;align-items:center;gap:6px;
+}
+body.display-mode #display-live-dot{display:flex;}
+#display-live-dot span{width:6px;height:6px;border-radius:50%;background:#2ecc71;display:inline-block;}
 </style>
 </head>
 <body>
@@ -259,6 +281,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
     <span id="sync-label">Conectando...</span>
   </span>
+  <button class="topbar-action" id="open-tv-btn" title="Abrir Modo TV em nova aba (pra deixar rodando no telão)"><i class="fa-solid fa-tv"></i> Modo TV</button>
   <button class="topbar-action" id="stage-btn" title="Tela de retorno (Stage View)"><i class="fa-solid fa-tv"></i> Retorno</button>
   <button id="present-btn"><i class="fa-solid fa-play"></i> Projetar</button>
 </div>
@@ -314,6 +337,14 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 
 <div class="toast" id="toast"></div>
 
+<div id="display-start">
+  <i class="fa-solid fa-tv" style="font-size:48px;color:var(--accent);"></i>
+  <h1 style="margin:0;font-size:22px;">Modo TV</h1>
+  <p>Esta tela vai mostrar só a projeção, em tela cheia, controlada remotamente pelo celular ou outro computador. Toque no botão abaixo pra entrar em tela cheia.</p>
+  <button id="display-start-btn"><i class="fa-solid fa-play"></i> Iniciar projeção</button>
+</div>
+<div id="display-live-dot"><span></span> Conectado ao controle remoto</div>
+
 <script type="module">
 /* =========================================================
    FIREBASE (Firestore) — sincronização em nuvem
@@ -336,6 +367,11 @@ const db = getFirestore(fbApp);
 const songsDocRef = doc(db,'holyrics_data','songs');
 const themesDocRef = doc(db,'holyrics_data','themes');
 const playlistsDocRef = doc(db,'holyrics_data','playlists');
+const liveDocRef = doc(db,'holyrics_data','live');
+
+const urlParams = new URLSearchParams(window.location.search);
+const isTvMode = urlParams.get('tv') === '1';
+if(isTvMode) document.body.classList.add('display-mode');
 
 function updateSyncStatus(state){
   const dot=document.getElementById('sync-dot');
@@ -371,6 +407,62 @@ async function doCloudSave(){
     updateSyncStatus('error');
     toast('Não consegui salvar na nuvem (conexão ou arquivo de tema muito grande).');
   }
+}
+
+let liveSaveTimer=null;
+function pushLiveState(){
+  if(isTvMode) return; // TV nunca escreve, só escuta
+  clearTimeout(liveSaveTimer);
+  liveSaveTimer=setTimeout(()=>{
+    setDoc(liveDocRef, {
+      songId: AppState.currentSongId || null,
+      slideIndex: AppState.currentSlideIndex || 0,
+      blackout: !!AppState.blackout,
+      themeId: AppState.activeThemeId || null,
+      overrideText: AppState.previewOverride ? AppState.previewOverride.text : null,
+      updatedAt: Date.now(),
+    }).catch(err=>console.error('Erro ao enviar estado ao vivo:', err));
+  }, 120);
+}
+
+async function initTvMode(){
+  updateSyncStatus('connecting');
+  try{
+    const [songsSnap, themesSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef)]);
+    if(songsSnap.exists() && Array.isArray(songsSnap.data().list)) AppState.songs = songsSnap.data().list;
+    if(themesSnap.exists() && Array.isArray(themesSnap.data().list) && themesSnap.data().list.length){
+      AppState.themes = themesSnap.data().list;
+      AppState.activeThemeId = themesSnap.data().activeThemeId || AppState.themes[0].id;
+    }
+  }catch(err){ console.warn('TV: sem conexão inicial, aguardando dados ao vivo.', err); }
+
+  onSnapshot(songsDocRef, snap=>{ if(snap.exists() && Array.isArray(snap.data().list)) AppState.songs = snap.data().list; applyLiveToPreview(); });
+  onSnapshot(themesDocRef, snap=>{
+    if(snap.exists() && Array.isArray(snap.data().list) && snap.data().list.length){
+      AppState.themes = snap.data().list;
+    }
+    applyLiveToPreview();
+  });
+  onSnapshot(liveDocRef, snap=>{
+    if(!snap.exists()) return;
+    const d = snap.data();
+    AppState.currentSongId = d.songId || null;
+    AppState.currentSlideIndex = d.slideIndex || 0;
+    AppState.blackout = !!d.blackout;
+    AppState.activeThemeId = d.themeId || AppState.activeThemeId;
+    AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
+    applyLiveToPreview();
+  });
+
+  document.getElementById('display-start').classList.add('show');
+  document.getElementById('display-start-btn').addEventListener('click', ()=>{
+    document.documentElement.requestFullscreen().catch(()=>{});
+    document.getElementById('display-start').classList.remove('show');
+    document.getElementById('projection-overlay').classList.add('show');
+  });
+}
+function applyLiveToPreview(){
+  updatePreview();
 }
 
 async function initCloudSync(){
@@ -1079,6 +1171,8 @@ function updatePreview(){
 
   // update slide list highlight without full rerender (cheap)
   document.querySelectorAll('.slide-card').forEach((c,i)=>c.classList.toggle('current', Number(c.dataset.idx)===AppState.currentSlideIndex));
+
+  pushLiveState();
 }
 
 document.getElementById('tr-next').addEventListener('click',goNextSlide);
@@ -1171,11 +1265,21 @@ function seedDefaultSongs(){
 /* =========================================================
    BOOTSTRAP
    ========================================================= */
+document.getElementById('open-tv-btn').addEventListener('click',()=>{
+  const url = new URL(window.location.href);
+  url.searchParams.set('tv','1');
+  window.open(url.toString(), '_blank');
+});
+
 loadState();          // cache local, pra abrir instantâneo mesmo offline
-seedDefaultSongs();
-renderView();
-updatePreview();
-initCloudSync();      // busca versão mais recente no Firestore e liga o tempo real
+if(isTvMode){
+  initTvMode();       // PC do telão: só escuta e projeta
+} else {
+  seedDefaultSongs();
+  renderView();
+  updatePreview();
+  initCloudSync();    // celular/computador de operação: edita e controla
+}
 </script>
 </body>
 </html>
