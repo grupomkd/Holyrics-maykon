@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Projeção — Fase 1</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+:root{
+  --bg:#1a1a2e;
+  --surface:#16213e;
+  --surface-2:#1f2b4d;
+  --primary:#0f3460;
+  --accent:#e94560;
+  --accent-2:#ff6b81;
+  --text:#eaeaea;
+  --text-dim:#9aa3b8;
+  --border:#2a3454;
+  --radius:10px;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+button{
+  font-family:inherit;
+  cursor:pointer;
+  border:none;
+  background:none;
+  color:inherit;
+}
+input,textarea,select{
+  font-family:inherit;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  color:var(--text);
+  border-radius:6px;
+  padding:8px 10px;
+  outline:none;
+}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);}
+
+/* ===== TOP BAR ===== */
+#topbar{
+  display:flex;
+  align-items:center;
+  gap:2px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  padding:0 8px;
+  height:44px;
+  flex-shrink:0;
+  z-index:20;
+}
+.tab-btn{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 14px;
+  border-radius:6px 6px 0 0;
+  font-size:13px;
+  color:var(--text-dim);
+  transition:.15s;
+}
+.tab-btn:hover{background:var(--surface-2);color:var(--text);}
+.tab-btn.active{background:var(--primary);color:#fff;}
+#topbar-spacer{flex:1;}
+.topbar-action{
+  padding:8px 12px;font-size:13px;color:var(--text-dim);border-radius:6px;
+}
+.topbar-action:hover{background:var(--surface-2);color:var(--text);}
+#present-btn{
+  background:var(--accent);color:#fff;border-radius:6px;padding:8px 16px;
+  font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;
+}
+#present-btn:hover{background:var(--accent-2);}
+
+/* ===== MAIN LAYOUT ===== */
+#main{flex:1;display:flex;min-height:0;}
+.panel{display:flex;flex-direction:column;min-height:0;}
+#panel-left{width:280px;background:var(--surface);border-right:1px solid var(--border);}
+#panel-center{flex:1;background:var(--bg);}
+#panel-right{width:320px;background:var(--surface);border-left:1px solid var(--border);}
+.panel-header{
+  padding:12px 14px;border-bottom:1px solid var(--border);
+  font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.panel-body{flex:1;overflow-y:auto;padding:10px;}
+
+/* ===== VIEWS ===== */
+.view{display:none;height:100%;flex-direction:column;}
+.view.active{display:flex;}
+
+/* Bible book grid */
+#book-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px;}
+.book-chip{
+  padding:8px 4px;border-radius:6px;font-size:11px;text-align:center;font-weight:600;
+  color:#fff;opacity:.55;transition:.15s;
+}
+.book-chip:hover{opacity:1;transform:translateY(-1px);}
+.book-chip.has-data{opacity:1;}
+.chapter-grid,.verse-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:6px;}
+.grid-cell{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:6px;
+  padding:8px 0;text-align:center;font-size:12px;
+}
+.grid-cell:hover{background:var(--primary);}
+.grid-cell.selected{background:var(--accent);border-color:var(--accent);}
+.crumb{display:flex;gap:6px;align-items:center;margin-bottom:10px;font-size:13px;color:var(--text-dim);flex-wrap:wrap;}
+.crumb span{cursor:pointer;}
+.crumb span:hover{color:var(--accent);text-decoration:underline;}
+
+.book-cat-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;font-size:10px;color:var(--text-dim);}
+.legend-dot{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;}
+
+#verse-reader{padding:16px;line-height:2;font-size:15px;}
+.verse-line{margin-bottom:8px;cursor:pointer;padding:4px 8px;border-radius:6px;}
+.verse-line:hover{background:var(--surface-2);}
+.verse-num{color:var(--accent);font-weight:700;margin-right:6px;font-size:11px;}
+
+/* Song list */
+.song-item{
+  padding:10px 12px;border-radius:8px;margin-bottom:6px;background:var(--surface-2);
+  border:1px solid transparent;cursor:pointer;
+}
+.song-item:hover{border-color:var(--border);}
+.song-item.selected{border-color:var(--accent);background:var(--primary);}
+.song-item .t{font-weight:600;font-size:13px;}
+.song-item .a{font-size:11px;color:var(--text-dim);}
+
+.slide-list{display:flex;flex-direction:column;gap:8px;}
+.slide-card{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+  padding:10px;font-size:13px;white-space:pre-wrap;cursor:grab;position:relative;
+}
+.slide-card.current{border-color:var(--accent);}
+.slide-card .slide-idx{font-size:10px;color:var(--text-dim);margin-bottom:4px;}
+.slide-card .slide-actions{position:absolute;top:6px;right:6px;display:flex;gap:4px;}
+.slide-card .slide-actions button{font-size:11px;color:var(--text-dim);}
+.slide-card .slide-actions button:hover{color:var(--accent);}
+.slide-card.dragging{opacity:.4;}
+
+/* Preview */
+#live-preview{
+  aspect-ratio:16/9;width:100%;border-radius:10px;overflow:hidden;position:relative;
+  background:#000;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);
+}
+#live-preview .preview-text{
+  text-align:center;padding:6%;width:100%;
+}
+.transport{display:flex;gap:6px;margin-top:10px;justify-content:center;}
+.transport button{
+  width:36px;height:36px;border-radius:8px;background:var(--surface-2);
+  display:flex;align-items:center;justify-content:center;font-size:14px;
+  border:1px solid var(--border);
+}
+.transport button:hover{background:var(--primary);}
+.transport button.wide{width:auto;padding:0 16px;}
+
+/* Forms */
+.field{margin-bottom:10px;}
+.field label{display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px;}
+.field input,.field textarea,.field select{width:100%;}
+.field textarea{min-height:80px;resize:vertical;}
+.btn{
+  background:var(--primary);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.btn:hover{background:#144a86;}
+.btn.accent{background:var(--accent);}
+.btn.accent:hover{background:var(--accent-2);}
+.btn.ghost{background:var(--surface-2);border:1px solid var(--border);}
+.btn.ghost:hover{background:var(--surface);}
+.btn.sm{padding:5px 10px;font-size:11px;}
+.row{display:flex;gap:8px;}
+.row > *{flex:1;}
+
+/* Theme editor */
+.swatch-row{display:flex;gap:6px;align-items:center;}
+.color-box{width:34px;height:34px;border-radius:6px;border:1px solid var(--border);cursor:pointer;}
+.theme-card{
+  padding:10px;border-radius:8px;background:var(--surface-2);margin-bottom:6px;cursor:pointer;
+  border:1px solid transparent;display:flex;align-items:center;gap:8px;
+}
+.theme-card.selected{border-color:var(--accent);}
+.theme-swatch{width:36px;height:24px;border-radius:4px;flex-shrink:0;}
+
+/* Playlist */
+#playlist-items{display:flex;flex-direction:column;gap:6px;}
+.pl-item{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
+  background:var(--surface-2);border:1px solid var(--border);cursor:grab;
+}
+.pl-item.dragging{opacity:.4;}
+.pl-item .pl-type{
+  font-size:9px;text-transform:uppercase;padding:2px 6px;border-radius:4px;background:var(--primary);color:#fff;
+}
+.pl-item .pl-title{flex:1;font-size:13px;}
+.pl-item.active-item{border-color:var(--accent);}
+.empty-hint{color:var(--text-dim);font-size:12px;text-align:center;padding:24px 10px;}
+
+/* Search */
+#bible-search-box{margin-bottom:10px;}
+.search-result{padding:8px 10px;border-radius:6px;background:var(--surface-2);margin-bottom:5px;font-size:12px;cursor:pointer;}
+.search-result:hover{background:var(--primary);}
+.search-result b{color:var(--accent);}
+
+/* ===== PROJECTION OVERLAY ===== */
+#projection-overlay{
+  position:fixed;inset:0;background:#000;z-index:9999;display:none;
+  align-items:center;justify-content:center;
+}
+#projection-overlay.show{display:flex;}
+#projection-bg{position:absolute;inset:0;background-size:cover;background-position:center;}
+#projection-text{position:relative;z-index:2;width:80%;text-align:center;white-space:pre-wrap;}
+#projection-exit-hint{
+  position:absolute;bottom:14px;right:18px;font-size:11px;color:rgba(255,255,255,.4);z-index:3;
+}
+
+/* Stage view */
+#stage-overlay{
+  position:fixed;inset:0;background:#000;z-index:9998;display:none;
+  flex-direction:column;align-items:center;justify-content:center;color:#fff;
+}
+#stage-overlay.show{display:flex;}
+#stage-current{font-size:5vw;text-align:center;padding:0 5%;white-space:pre-wrap;}
+#stage-next{font-size:2vw;color:#888;margin-top:30px;text-align:center;padding:0 5%;white-space:pre-wrap;}
+#stage-counter{position:absolute;top:20px;right:30px;font-size:1.2vw;color:#666;}
+
+.hidden{display:none !important;}
+.toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+  background:var(--surface-2);border:1px solid var(--accent);color:#fff;
+  padding:10px 18px;border-radius:8px;font-size:13px;z-index:99999;opacity:0;
+  transition:opacity .2s;pointer-events:none;
+}
+.toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <button class="tab-btn active" data-view="bible"><i class="fa-solid fa-book-bible"></i> Bíblia</button>
+  <button class="tab-btn" data-view="songs"><i class="fa-solid fa-music"></i> Músicas</button>
+  <button class="tab-btn" data-view="themes"><i class="fa-solid fa-palette"></i> Temas</button>
+  <button class="tab-btn" data-view="playlist"><i class="fa-solid fa-list-check"></i> Playlist</button>
+  <div id="topbar-spacer"></div>
+  <span id="sync-status" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding:0 10px;">
+    <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
+    <span id="sync-label">Conectando...</span>
+  </span>
+  <button class="topbar-action" id="stage-btn" title="Tela de retorno (Stage View)"><i class="fa-solid fa-tv"></i> Retorno</button>
+  <button id="present-btn"><i class="fa-solid fa-play"></i> Projetar</button>
+</div>
+
+<div id="main">
+
+  <!-- LEFT PANEL -->
+  <div class="panel" id="panel-left">
+    <div class="panel-header" id="left-header">Biblioteca</div>
+    <div class="panel-body" id="left-body"></div>
+  </div>
+
+  <!-- CENTER PANEL -->
+  <div class="panel" id="panel-center">
+    <div class="panel-header" id="center-header">Editor</div>
+    <div class="panel-body" id="center-body"></div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel" id="panel-right">
+    <div class="panel-header">Preview ao vivo</div>
+    <div class="panel-body">
+      <div id="live-preview">
+        <div class="preview-text" id="preview-text-el">Selecione um slide</div>
+      </div>
+      <div class="transport">
+        <button id="tr-prev" title="Slide anterior (←)"><i class="fa-solid fa-backward-step"></i></button>
+        <button id="tr-blackout" title="Preto (B)"><i class="fa-solid fa-power-off"></i></button>
+        <button id="tr-next" title="Próximo slide (→)"><i class="fa-solid fa-forward-step"></i></button>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="panel-header" style="padding:0 0 8px 0;border:none;">Tema aplicado</div>
+        <select id="theme-select" style="width:100%;"></select>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- PROJECTION OVERLAY -->
+<div id="projection-overlay">
+  <div id="projection-bg"></div>
+  <div id="projection-text">Aguardando...</div>
+  <div id="projection-exit-hint">ESC para sair • F tela cheia • ← → slides</div>
+</div>
+
+<!-- STAGE VIEW OVERLAY -->
+<div id="stage-overlay">
+  <div id="stage-counter"></div>
+  <div id="stage-current"></div>
+  <div id="stage-next"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* =========================================================
+   FIREBASE (Firestore) — sincronização em nuvem
+   ========================================================= */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDut6pM1ajgL8n-zjQCgEdqzLsj2IKgKtI",
+  authDomain: "holyrics-maykon.firebaseapp.com",
+  databaseURL: "https://holyrics-maykon-default-rtdb.firebaseio.com",
+  projectId: "holyrics-maykon",
+  storageBucket: "holyrics-maykon.firebasestorage.app",
+  messagingSenderId: "1001954693084",
+  appId: "1:1001954693084:web:a90f8422b1f94902f14919",
+  measurementId: "G-Z8DD9ZE9FE"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const songsDocRef = doc(db,'holyrics_data','songs');
+const themesDocRef = doc(db,'holyrics_data','themes');
+const playlistsDocRef = doc(db,'holyrics_data','playlists');
+
+function updateSyncStatus(state){
+  const dot=document.getElementById('sync-dot');
+  const label=document.getElementById('sync-label');
+  if(!dot||!label) return;
+  const map={
+    connecting:['#f5a623','Conectando...'],
+    synced:['#2ecc71','Sincronizado'],
+    saving:['#f5a623','Salvando...'],
+    offline:['#888','Offline (usando cache local)'],
+    error:['#e94560','Erro ao sincronizar'],
+  };
+  const [color,text]=map[state]||map.offline;
+  dot.style.background=color; label.textContent=text;
+}
+
+let cloudSaveTimer=null;
+function scheduleCloudSave(){
+  updateSyncStatus('saving');
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(doCloudSave,700);
+}
+async function doCloudSave(){
+  try{
+    await Promise.all([
+      setDoc(songsDocRef, {list: AppState.songs}),
+      setDoc(themesDocRef, {list: AppState.themes, activeThemeId: AppState.activeThemeId||''}),
+      setDoc(playlistsDocRef, {list: AppState.playlists}),
+    ]);
+    updateSyncStatus('synced');
+  }catch(err){
+    console.error('Erro salvando no Firestore:', err);
+    updateSyncStatus('error');
+    toast('Não consegui salvar na nuvem (conexão ou arquivo de tema muito grande).');
+  }
+}
+
+async function initCloudSync(){
+  updateSyncStatus('connecting');
+  try{
+    const [songsSnap, themesSnap, plSnap] = await Promise.all([getDoc(songsDocRef), getDoc(themesDocRef), getDoc(playlistsDocRef)]);
+    if(songsSnap.exists() && Array.isArray(songsSnap.data().list)) AppState.songs = songsSnap.data().list;
+    if(themesSnap.exists() && Array.isArray(themesSnap.data().list) && themesSnap.data().list.length){
+      AppState.themes = themesSnap.data().list;
+      AppState.activeThemeId = themesSnap.data().activeThemeId || AppState.themes[0].id;
+    }
+    if(plSnap.exists() && Array.isArray(plSnap.data().list)) AppState.playlists = plSnap.data().list;
+    seedDefaultSongs();
+    renderView(); updatePreview();
+    updateSyncStatus('synced');
+  }catch(err){
+    console.warn('Sem conexão com o Firestore, usando cache local.', err);
+    updateSyncStatus('offline');
+  }
+  onSnapshot(songsDocRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    if(snap.exists() && Array.isArray(snap.data().list)){
+      AppState.songs = snap.data().list;
+      if(AppState.view==='songs') renderView();
+      updatePreview();
+    }
+  });
+  onSnapshot(themesDocRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    if(snap.exists() && Array.isArray(snap.data().list) && snap.data().list.length){
+      AppState.themes = snap.data().list;
+      if(snap.data().activeThemeId) AppState.activeThemeId = snap.data().activeThemeId;
+      if(AppState.view==='themes') renderView();
+      renderThemeSelect(); updatePreview();
+    }
+  });
+  onSnapshot(playlistsDocRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    if(snap.exists() && Array.isArray(snap.data().list)){
+      AppState.playlists = snap.data().list;
+      if(AppState.view==='playlist') renderView();
+    }
+  });
+}
+
+/* =========================================================
+   STATE
+   ========================================================= */
+const AppState = {
+  view: 'bible',
+  bible: { book:null, chapter:null, verse:null, version:'ARA' },
+  songs: [],
+  themes: [],
+  playlists: [],
+  currentSongId: null,
+  currentSlideIndex: 0,
+  currentPlaylistId: null,
+  activeThemeId: null,
+  blackout: false,
+};
+
+function saveState(){
+  // cache local instantâneo (funciona offline)
+  localStorage.setItem('holyrics_songs', JSON.stringify(AppState.songs));
+  localStorage.setItem('holyrics_themes', JSON.stringify(AppState.themes));
+  localStorage.setItem('holyrics_playlists', JSON.stringify(AppState.playlists));
+  localStorage.setItem('holyrics_active_theme', AppState.activeThemeId || '');
+  // sincroniza com o Firestore (debounced)
+  scheduleCloudSave();
+}
+function loadState(){
+  AppState.songs = JSON.parse(localStorage.getItem('holyrics_songs') || '[]');
+  AppState.themes = JSON.parse(localStorage.getItem('holyrics_themes') || '[]');
+  AppState.playlists = JSON.parse(localStorage.getItem('holyrics_playlists') || '[]');
+  AppState.activeThemeId = localStorage.getItem('holyrics_active_theme') || null;
+  if(AppState.themes.length===0){
+    AppState.themes.push(defaultTheme());
+    AppState.activeThemeId = AppState.themes[0].id;
+  }
+}
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+function defaultTheme(){
+  return {
+    id: uid(),
+    name: 'Padrão Escuro',
+    background:{type:'color', value:'#0d0d1a', opacity:100},
+    font:{family:"'Inter',sans-serif", size:44, color:'#ffffff', bold:true, italic:false},
+    effects:{outline:false, shadow:true, glow:0},
+    alignment:'center',
+    lineHeight:1.4,
+  };
+}
+
+/* =========================================================
+   BIBLE DATA (amostra: Gênesis 1-3 e Salmos 23)
+   Estrutura completa dos 66 livros com metadados de categoria/cor,
+   mas apenas os livros abaixo têm capítulos/versículos carregados.
+   Para adicionar o restante, siga o formato de bibleData.texts.
+   ========================================================= */
+const bibleCategories = {
+  pentateuco:{label:'Pentateuco', color:'#8d5b3c'},
+  historicos:{label:'Históricos', color:'#d97b29'},
+  poeticos:{label:'Poéticos', color:'#c0392b'},
+  profetas:{label:'Profetas', color:'#7d3c98'},
+  evangelhos:{label:'Evangelhos', color:'#2e6db4'},
+  paulinas:{label:'Epístolas Paulinas', color:'#277a5f'},
+  gerais:{label:'Epístolas Gerais', color:'#1b5e4a'},
+  apocalipse:{label:'Apocalipse', color:'#9acd32'},
+};
+const bibleBooks = [
+  ['Gênesis','Gn','pentateuco'],['Êxodo','Ex','pentateuco'],['Levítico','Lv','pentateuco'],['Números','Nm','pentateuco'],['Deuteronômio','Dt','pentateuco'],
+  ['Josué','Js','historicos'],['Juízes','Jz','historicos'],['Rute','Rt','historicos'],['1 Samuel','1Sm','historicos'],['2 Samuel','2Sm','historicos'],
+  ['1 Reis','1Rs','historicos'],['2 Reis','2Rs','historicos'],['1 Crônicas','1Cr','historicos'],['2 Crônicas','2Cr','historicos'],['Esdras','Ed','historicos'],
+  ['Neemias','Ne','historicos'],['Ester','Et','historicos'],
+  ['Jó','Jó','poeticos'],['Salmos','Sl','poeticos'],['Provérbios','Pv','poeticos'],['Eclesiastes','Ec','poeticos'],['Cânticos','Ct','poeticos'],
+  ['Isaías','Is','profetas'],['Jeremias','Jr','profetas'],['Lamentações','Lm','profetas'],['Ezequiel','Ez','profetas'],['Daniel','Dn','profetas'],
+  ['Oséias','Os','profetas'],['Joel','Jl','profetas'],['Amós','Am','profetas'],['Obadias','Ob','profetas'],['Jonas','Jn','profetas'],
+  ['Miquéias','Mq','profetas'],['Naum','Na','profetas'],['Habacuque','Hc','profetas'],['Sofonias','Sf','profetas'],['Ageu','Ag','profetas'],
+  ['Zacarias','Zc','profetas'],['Malaquias','Ml','profetas'],
+  ['Mateus','Mt','evangelhos'],['Marcos','Mc','evangelhos'],['Lucas','Lc','evangelhos'],['João','Jo','evangelhos'],['Atos','At','evangelhos'],
+  ['Romanos','Rm','paulinas'],['1 Coríntios','1Co','paulinas'],['2 Coríntios','2Co','paulinas'],['Gálatas','Gl','paulinas'],['Efésios','Ef','paulinas'],
+  ['Filipenses','Fp','paulinas'],['Colossenses','Cl','paulinas'],['1 Tessalonicenses','1Ts','paulinas'],['2 Tessalonicenses','2Ts','paulinas'],
+  ['1 Timóteo','1Tm','paulinas'],['2 Timóteo','2Tm','paulinas'],['Tito','Tt','paulinas'],['Filemom','Fm','paulinas'],
+  ['Hebreus','Hb','gerais'],['Tiago','Tg','gerais'],['1 Pedro','1Pe','gerais'],['2 Pedro','2Pe','gerais'],['1 João','1Jo','gerais'],
+  ['2 João','2Jo','gerais'],['3 João','3Jo','gerais'],['Judas','Jd','gerais'],
+  ['Apocalipse','Ap','apocalipse'],
+].map(([name,abbrev,cat])=>({name,abbrev,cat}));
+
+const bibleData = {
+  texts:{
+    'Gênesis':{
+      1:["No princípio, criou Deus os céus e a terra.","E a terra era sem forma e vazia; e havia trevas sobre a face do abismo; e o Espírito de Deus se movia sobre a face das águas.","E disse Deus: Haja luz; e houve luz.","E viu Deus que era boa a luz; e fez Deus separação entre a luz e as trevas.","E Deus chamou à luz Dia; e às trevas chamou Noite. E foi a tarde e a manhã, o dia primeiro.","E disse Deus: Haja uma expansão no meio das águas, e haja separação entre águas e águas.","E fez Deus a expansão, e fez separação entre as águas que estavam debaixo da expansão e as águas que estavam sobre a expansão; e assim foi.","E chamou Deus à expansão Céus; e foi a tarde e a manhã, o dia segundo."],
+      2:["Assim, pois, foram acabados os céus e a terra, e todo o seu exército.","E, havendo Deus acabado no dia sétimo a sua obra, que tinha feito, descansou no sétimo dia de toda a sua obra, que tinha feito.","E abençoou Deus o dia sétimo, e o santificou; porque nele descansou de toda a sua obra que Deus criara e fizera.","Estas são as origens dos céus e da terra, quando foram criados; no dia em que o Senhor Deus fez a terra e os céus.","E toda planta do campo ainda não estava na terra, e toda erva do campo ainda não brotava; porque ainda o Senhor Deus não tinha feito chover sobre a terra, nem havia homem para lavrar a terra.","Um vapor, porém, subia da terra e regava toda a face da terra.","E formou o Senhor Deus o homem do pó da terra, e soprou em suas narinas o fôlego da vida; e o homem foi feito alma vivente."],
+      3:["Ora, a serpente era mais astuta que todos os animais do campo que o Senhor Deus tinha feito. E esta disse à mulher: É assim que Deus disse: Não comereis de toda árvore do jardim?","E disse a mulher à serpente: Do fruto das árvores do jardim comeremos,","Mas do fruto da árvore que está no meio do jardim, disse Deus: Não comereis dele, nem tocareis nele, para que não morrais.","Então a serpente disse à mulher: Certamente não morrereis.","Porque Deus sabe que no dia em que dele comerdes se abrirão os vossos olhos, e sereis como Deus, sabendo o bem e o mal."],
+    },
+    'Salmos':{
+      23:["O Senhor é o meu pastor; nada me faltará.","Deitar-me faz em verdes pastos, guia-me mansamente a águas tranquilas.","Refrigera a minha alma; guia-me pelas veredas da justiça, por amor do seu nome.","Ainda que eu andasse pelo vale da sombra da morte, não temeria mal algum, porque tu estás comigo; a tua vara e o teu cajado me consolam.","Preparas uma mesa perante mim na presença dos meus inimigos, unges a minha cabeça com óleo, o meu cálice transborda.","Certamente que a bondade e a misericórdia me seguirão todos os dias da minha vida; e habitarei na casa do Senhor por longos dias."],
+    }
+  }
+};
+function bookHasData(name){ return !!bibleData.texts[name]; }
+function getChapters(bookName){ return Object.keys(bibleData.texts[bookName]||{}).map(Number).sort((a,b)=>a-b); }
+function getVerses(bookName,chapter){ return (bibleData.texts[bookName]||{})[chapter] || []; }
+
+/* =========================================================
+   RENDER: TOP BAR / VIEW SWITCH
+   ========================================================= */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>switchView(btn.dataset.view));
+});
+function switchView(view){
+  AppState.view = view;
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  renderView();
+}
+
+function renderView(){
+  const leftHeader=document.getElementById('left-header');
+  const leftBody=document.getElementById('left-body');
+  const centerHeader=document.getElementById('center-header');
+  const centerBody=document.getElementById('center-body');
+  leftBody.innerHTML=''; centerBody.innerHTML='';
+
+  if(AppState.view==='bible'){
+    leftHeader.textContent='Bíblia — Livros';
+    centerHeader.textContent='Leitura';
+    renderBibleLeft(leftBody);
+    renderBibleCenter(centerBody);
+  } else if(AppState.view==='songs'){
+    leftHeader.textContent='Músicas';
+    centerHeader.textContent='Editor de música';
+    renderSongsLeft(leftBody);
+    renderSongsCenter(centerBody);
+  } else if(AppState.view==='themes'){
+    leftHeader.textContent='Temas';
+    centerHeader.textContent='Editor de tema';
+    renderThemesLeft(leftBody);
+    renderThemesCenter(centerBody);
+  } else if(AppState.view==='playlist'){
+    leftHeader.textContent='Playlists';
+    centerHeader.textContent='Itens da playlist';
+    renderPlaylistLeft(leftBody);
+    renderPlaylistCenter(centerBody);
+  }
+  renderThemeSelect();
+}
+
+/* =========================================================
+   BIBLE MODULE
+   ========================================================= */
+function renderBibleLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML = `
+    <div id="bible-search-box">
+      <input type="text" id="bible-search-input" placeholder="Buscar na Bíblia... (Ctrl+F)">
+    </div>
+    <div class="book-cat-legend">
+      ${Object.values(bibleCategories).map(c=>`<span><span class="legend-dot" style="background:${c.color}"></span>${c.label}</span>`).join('')}
+    </div>
+    <div id="book-grid"></div>
+    <div id="search-results" style="margin-top:10px;"></div>
+  `;
+  container.appendChild(wrap);
+  const grid=wrap.querySelector('#book-grid');
+  bibleBooks.forEach(b=>{
+    const chip=document.createElement('div');
+    chip.className='book-chip'+(bookHasData(b.name)?' has-data':'');
+    chip.style.background=bibleCategories[b.cat].color;
+    chip.textContent=b.abbrev;
+    chip.title=b.name+(bookHasData(b.name)?'':' (sem dados carregados)');
+    chip.addEventListener('click',()=>{
+      if(!bookHasData(b.name)){ toast(`"${b.name}" ainda não tem texto carregado nesta demo. Adicione em bibleData.texts.`); return; }
+      AppState.bible.book=b.name; AppState.bible.chapter=null; AppState.bible.verse=null;
+      renderView();
+    });
+    grid.appendChild(chip);
+  });
+
+  wrap.querySelector('#bible-search-input').addEventListener('input', e=>{
+    doBibleSearch(e.target.value, wrap.querySelector('#search-results'));
+  });
+}
+
+function doBibleSearch(term, resultsEl){
+  resultsEl.innerHTML='';
+  if(!term || term.trim().length<2) return;
+  const t=term.toLowerCase();
+  let count=0;
+  for(const [book,chapters] of Object.entries(bibleData.texts)){
+    for(const [chap,verses] of Object.entries(chapters)){
+      verses.forEach((v,i)=>{
+        if(count>=25) return;
+        if(v.toLowerCase().includes(t)){
+          count++;
+          const div=document.createElement('div');
+          div.className='search-result';
+          const highlighted=v.replace(new RegExp(term,'ig'), m=>`<b>${m}</b>`);
+          div.innerHTML=`<b style="color:var(--accent)">${book} ${chap}:${i+1}</b><br>${highlighted}`;
+          div.addEventListener('click',()=>{
+            AppState.bible.book=book; AppState.bible.chapter=Number(chap); AppState.bible.verse=i;
+            renderView();
+          });
+          resultsEl.appendChild(div);
+        }
+      });
+    }
+  }
+  if(count===0){
+    resultsEl.innerHTML='<div class="empty-hint">Nenhum resultado (apenas Gênesis 1-3 e Salmos 23 estão carregados nesta demo)</div>';
+  }
+}
+
+function renderBibleCenter(container){
+  const {book,chapter,verse}=AppState.bible;
+  const crumb=document.createElement('div');
+  crumb.className='crumb';
+  crumb.innerHTML = `<span id="crumb-books">Livros</span>` +
+    (book? ` <i class="fa-solid fa-chevron-right" style="font-size:9px"></i> <span id="crumb-book">${book}</span>`:'') +
+    (chapter? ` <i class="fa-solid fa-chevron-right" style="font-size:9px"></i> <span>Capítulo ${chapter}</span>`:'');
+  container.appendChild(crumb);
+  crumb.querySelector('#crumb-books').addEventListener('click',()=>{AppState.bible.book=null;renderView();});
+  const bcrumb=crumb.querySelector('#crumb-book');
+  if(bcrumb) bcrumb.addEventListener('click',()=>{AppState.bible.chapter=null;renderView();});
+
+  if(!book){
+    const hint=document.createElement('div');
+    hint.className='empty-hint';
+    hint.textContent='Selecione um livro à esquerda para começar.';
+    container.appendChild(hint);
+    return;
+  }
+  if(!chapter){
+    const chapters=getChapters(book);
+    const grid=document.createElement('div');
+    grid.className='chapter-grid';
+    chapters.forEach(c=>{
+      const cell=document.createElement('div');
+      cell.className='grid-cell';
+      cell.textContent=c;
+      cell.addEventListener('click',()=>{AppState.bible.chapter=c; renderView();});
+      grid.appendChild(cell);
+    });
+    container.appendChild(grid);
+    return;
+  }
+  const verses=getVerses(book,chapter);
+  const reader=document.createElement('div');
+  reader.id='verse-reader';
+  verses.forEach((v,i)=>{
+    const line=document.createElement('div');
+    line.className='verse-line';
+    line.innerHTML=`<span class="verse-num">${i+1}</span>${v}`;
+    line.addEventListener('click',()=>{
+      setPreviewFromBible(book,chapter,i,v);
+      toast(`Enviado ao preview: ${book} ${chapter}:${i+1}`);
+    });
+    reader.appendChild(line);
+  });
+  container.appendChild(reader);
+}
+
+function setPreviewFromBible(book,chapter,verseIdx,text){
+  AppState.currentSongId=null;
+  AppState.previewOverride = {
+    type:'bible',
+    ref:`${book} ${chapter}:${verseIdx+1}`,
+    text: `${text}\n\n${book} ${chapter}:${verseIdx+1}`
+  };
+  updatePreview();
+}
+
+/* =========================================================
+   SONGS MODULE
+   ========================================================= */
+function renderSongsLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<button class="btn accent sm" id="new-song-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Nova música</button>
+    <input type="text" id="song-search" placeholder="Buscar música..." style="width:100%;margin-bottom:10px;">
+    <div id="song-list"></div>`;
+  container.appendChild(wrap);
+  wrap.querySelector('#new-song-btn').addEventListener('click',()=>{
+    const s={id:uid(),title:'Nova música',artist:'',notes:'',lyrics:'',slides:[],themeId:null,history:[],createdAt:Date.now()};
+    AppState.songs.unshift(s); AppState.currentSongId=s.id; saveState(); renderView();
+  });
+  wrap.querySelector('#song-search').addEventListener('input',e=>renderSongList(wrap.querySelector('#song-list'),e.target.value));
+  renderSongList(wrap.querySelector('#song-list'),'');
+}
+function renderSongList(el,filter){
+  el.innerHTML='';
+  const f=filter.toLowerCase();
+  const list=AppState.songs.filter(s=> !f || s.title.toLowerCase().includes(f) || (s.artist||'').toLowerCase().includes(f) || (s.lyrics||'').toLowerCase().includes(f));
+  if(list.length===0){ el.innerHTML='<div class="empty-hint">Nenhuma música ainda</div>'; return; }
+  list.forEach(s=>{
+    const item=document.createElement('div');
+    item.className='song-item'+(AppState.currentSongId===s.id?' selected':'');
+    item.innerHTML=`<div class="t">${s.title||'(sem título)'}</div><div class="a">${s.artist||'—'} · ${s.slides.length} slides</div>`;
+    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; renderView();});
+    el.appendChild(item);
+  });
+}
+function currentSong(){ return AppState.songs.find(s=>s.id===AppState.currentSongId); }
+
+function renderSongsCenter(container){
+  const song=currentSong();
+  if(!song){
+    container.innerHTML='<div class="empty-hint">Selecione ou crie uma música à esquerda.</div>';
+    return;
+  }
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="row">
+      <div class="field"><label>Título</label><input id="f-title" value="${escapeHtml(song.title)}"></div>
+      <div class="field"><label>Artista / Autor</label><input id="f-artist" value="${escapeHtml(song.artist||'')}"></div>
+    </div>
+    <div class="field"><label>Anotações</label><input id="f-notes" value="${escapeHtml(song.notes||'')}"></div>
+    <div class="field"><label>Letra completa (separe estrofes com linha em branco para gerar slides automaticamente)</label>
+      <textarea id="f-lyrics" style="min-height:140px;">${escapeHtml(song.lyrics||'')}</textarea>
+    </div>
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn" id="auto-split-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar slides automaticamente</button>
+      <button class="btn ghost" id="add-slide-btn"><i class="fa-solid fa-plus"></i> Slide em branco</button>
+      <button class="btn ghost" id="delete-song-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir música</button>
+    </div>
+    <div class="panel-header" style="padding-left:0;border:none;">Slides (${song.slides.length}) — arraste para reordenar</div>
+    <div class="slide-list" id="slide-list"></div>
+  `;
+  container.appendChild(wrap);
+
+  wrap.querySelector('#f-title').addEventListener('input',e=>{song.title=e.target.value; saveState();});
+  wrap.querySelector('#f-artist').addEventListener('input',e=>{song.artist=e.target.value; saveState();});
+  wrap.querySelector('#f-notes').addEventListener('input',e=>{song.notes=e.target.value; saveState();});
+  wrap.querySelector('#f-lyrics').addEventListener('input',e=>{song.lyrics=e.target.value; saveState();});
+  wrap.querySelector('#auto-split-btn').addEventListener('click',()=>{
+    const parts=(song.lyrics||'').split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean);
+    song.slides = parts.map((text,i)=>({id:uid(),text,order:i}));
+    saveState(); renderView(); toast(`${parts.length} slides gerados`);
+  });
+  wrap.querySelector('#add-slide-btn').addEventListener('click',()=>{
+    song.slides.push({id:uid(),text:'Novo slide',order:song.slides.length});
+    saveState(); renderView();
+  });
+  wrap.querySelector('#delete-song-btn').addEventListener('click',()=>{
+    if(!confirm('Excluir esta música?')) return;
+    AppState.songs=AppState.songs.filter(s=>s.id!==song.id);
+    AppState.currentSongId=null; saveState(); renderView();
+  });
+
+  const slideListEl=wrap.querySelector('#slide-list');
+  song.slides.forEach((slide,idx)=>{
+    const card=document.createElement('div');
+    card.className='slide-card'+(idx===AppState.currentSlideIndex && AppState.currentSongId===song.id ?' current':'');
+    card.draggable=true;
+    card.dataset.idx=idx;
+    card.innerHTML=`<div class="slide-idx">Slide ${idx+1}</div>
+      <div class="slide-actions">
+        <button class="dup-btn" title="Duplicar"><i class="fa-solid fa-copy"></i></button>
+        <button class="del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="slide-content" contenteditable="true">${escapeHtml(slide.text)}</div>`;
+    card.addEventListener('click',(e)=>{
+      if(e.target.closest('.slide-actions')) return;
+      AppState.currentSlideIndex=idx; updatePreview(); renderView();
+    });
+    card.querySelector('.slide-content').addEventListener('blur',e=>{
+      slide.text=e.target.textContent; saveState(); updatePreview();
+    });
+    card.querySelector('.dup-btn').addEventListener('click',(e)=>{
+      e.stopPropagation();
+      song.slides.splice(idx+1,0,{id:uid(),text:slide.text,order:idx+1});
+      saveState(); renderView();
+    });
+    card.querySelector('.del-btn').addEventListener('click',(e)=>{
+      e.stopPropagation();
+      song.slides.splice(idx,1); saveState(); renderView();
+    });
+    // drag reorder
+    card.addEventListener('dragstart',()=>card.classList.add('dragging'));
+    card.addEventListener('dragend',()=>{card.classList.remove('dragging'); saveState();});
+    card.addEventListener('dragover',(e)=>{
+      e.preventDefault();
+      const dragging=slideListEl.querySelector('.dragging');
+      if(!dragging || dragging===card) return;
+      const rect=card.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      slideListEl.insertBefore(dragging, before?card:card.nextSibling);
+      // rebuild song.slides order from DOM
+      const newOrder=[...slideListEl.children].map(c=>song.slides[Number(c.dataset.idx)]);
+      song.slides = newOrder.filter(Boolean);
+      [...slideListEl.children].forEach((c,i)=>c.dataset.idx=i);
+    });
+    slideListEl.appendChild(card);
+  });
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* =========================================================
+   THEMES MODULE
+   ========================================================= */
+function renderThemesLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<button class="btn accent sm" id="new-theme-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Novo tema</button>
+  <div id="theme-list"></div>`;
+  container.appendChild(wrap);
+  wrap.querySelector('#new-theme-btn').addEventListener('click',()=>{
+    const t=defaultTheme(); t.name='Novo tema';
+    AppState.themes.push(t); AppState.editingThemeId=t.id; saveState(); renderView();
+  });
+  const listEl=wrap.querySelector('#theme-list');
+  AppState.themes.forEach(t=>{
+    const card=document.createElement('div');
+    card.className='theme-card'+(AppState.editingThemeId===t.id?' selected':'');
+    const bg = t.background.type==='color'? t.background.value : '#333';
+    card.innerHTML=`<div class="theme-swatch" style="background:${bg};"></div><div style="flex:1;font-size:13px;">${escapeHtml(t.name)}</div>${AppState.activeThemeId===t.id?'<i class="fa-solid fa-check" style="color:var(--accent)"></i>':''}`;
+    card.addEventListener('click',()=>{AppState.editingThemeId=t.id; renderView();});
+    listEl.appendChild(card);
+  });
+}
+function renderThemesCenter(container){
+  const theme = AppState.themes.find(t=>t.id===AppState.editingThemeId) || AppState.themes[0];
+  AppState.editingThemeId = theme.id;
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Nome do tema</label><input id="th-name" value="${escapeHtml(theme.name)}"></div>
+    <div class="row">
+      <div class="field">
+        <label>Fundo</label>
+        <div class="swatch-row">
+          <input type="color" id="th-bg-color" value="${theme.background.type==='color'?theme.background.value:'#0d0d1a'}">
+          <button class="btn ghost sm" id="th-bg-upload-btn"><i class="fa-solid fa-image"></i> Imagem</button>
+          <input type="file" id="th-bg-file" accept="image/*" class="hidden">
+        </div>
+      </div>
+      <div class="field"><label>Opacidade do fundo (${theme.background.opacity}%)</label>
+        <input type="range" id="th-bg-opacity" min="0" max="100" value="${theme.background.opacity}" style="width:100%;">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Cor da fonte</label><input type="color" id="th-font-color" value="${theme.font.color}"></div>
+      <div class="field"><label>Tamanho (${theme.font.size}px)</label><input type="range" id="th-font-size" min="16" max="90" value="${theme.font.size}" style="width:100%;"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Alinhamento</label>
+        <select id="th-align">
+          <option value="left">Esquerda</option><option value="center">Centro</option><option value="right">Direita</option><option value="justify">Justificado</option>
+        </select>
+      </div>
+      <div class="field"><label>Espaçamento entre linhas (${theme.lineHeight})</label><input type="range" id="th-lh" min="1" max="2.5" step="0.1" value="${theme.lineHeight}" style="width:100%;"></div>
+    </div>
+    <div class="row" style="margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="th-bold" ${theme.font.bold?'checked':''}> Negrito</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="th-italic" ${theme.font.italic?'checked':''}> Itálico</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="th-shadow" ${theme.effects.shadow?'checked':''}> Sombra</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="th-outline" ${theme.effects.outline?'checked':''}> Contorno</label>
+    </div>
+    <div class="row">
+      <button class="btn accent" id="th-activate-btn"><i class="fa-solid fa-check"></i> Usar este tema na projeção</button>
+      <button class="btn ghost" id="th-delete-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir tema</button>
+    </div>
+  `;
+  container.appendChild(wrap);
+  const q=(sel)=>wrap.querySelector(sel);
+  const apply=()=>{ saveState(); renderView(); updatePreview(); };
+  q('#th-name').addEventListener('input',e=>{theme.name=e.target.value; saveState();});
+  q('#th-bg-color').addEventListener('input',e=>{theme.background.type='color'; theme.background.value=e.target.value; apply();});
+  q('#th-bg-opacity').addEventListener('input',e=>{theme.background.opacity=Number(e.target.value); apply();});
+  q('#th-bg-upload-btn').addEventListener('click',()=>q('#th-bg-file').click());
+  q('#th-bg-file').addEventListener('change',e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{ theme.background.type='image'; theme.background.value=ev.target.result; apply(); toast('Imagem de fundo aplicada'); };
+    reader.readAsDataURL(file);
+  });
+  q('#th-font-color').addEventListener('input',e=>{theme.font.color=e.target.value; apply();});
+  q('#th-font-size').addEventListener('input',e=>{theme.font.size=Number(e.target.value); apply();});
+  q('#th-align').value=theme.alignment;
+  q('#th-align').addEventListener('change',e=>{theme.alignment=e.target.value; apply();});
+  q('#th-lh').addEventListener('input',e=>{theme.lineHeight=Number(e.target.value); apply();});
+  q('#th-bold').addEventListener('change',e=>{theme.font.bold=e.target.checked; apply();});
+  q('#th-italic').addEventListener('change',e=>{theme.font.italic=e.target.checked; apply();});
+  q('#th-shadow').addEventListener('change',e=>{theme.effects.shadow=e.target.checked; apply();});
+  q('#th-outline').addEventListener('change',e=>{theme.effects.outline=e.target.checked; apply();});
+  q('#th-activate-btn').addEventListener('click',()=>{AppState.activeThemeId=theme.id; apply(); toast(`Tema "${theme.name}" ativo`);});
+  q('#th-delete-btn').addEventListener('click',()=>{
+    if(AppState.themes.length<=1){ toast('Mantenha ao menos um tema.'); return; }
+    if(!confirm('Excluir este tema?')) return;
+    AppState.themes=AppState.themes.filter(t=>t.id!==theme.id);
+    if(AppState.activeThemeId===theme.id) AppState.activeThemeId=AppState.themes[0].id;
+    AppState.editingThemeId=null; apply();
+  });
+}
+function renderThemeSelect(){
+  const sel=document.getElementById('theme-select');
+  sel.innerHTML='';
+  AppState.themes.forEach(t=>{
+    const opt=document.createElement('option');
+    opt.value=t.id; opt.textContent=t.name;
+    if(t.id===AppState.activeThemeId) opt.selected=true;
+    sel.appendChild(opt);
+  });
+  sel.onchange=()=>{ AppState.activeThemeId=sel.value; saveState(); updatePreview(); };
+}
+
+/* =========================================================
+   PLAYLIST MODULE
+   ========================================================= */
+function renderPlaylistLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<button class="btn accent sm" id="new-pl-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Nova playlist</button>
+  <div id="pl-list"></div>`;
+  container.appendChild(wrap);
+  wrap.querySelector('#new-pl-btn').addEventListener('click',()=>{
+    const p={id:uid(),name:'Culto '+new Date().toLocaleDateString('pt-BR'),items:[],createdAt:Date.now()};
+    AppState.playlists.unshift(p); AppState.currentPlaylistId=p.id; saveState(); renderView();
+  });
+  const listEl=wrap.querySelector('#pl-list');
+  if(AppState.playlists.length===0) listEl.innerHTML='<div class="empty-hint">Nenhuma playlist ainda</div>';
+  AppState.playlists.forEach(p=>{
+    const item=document.createElement('div');
+    item.className='song-item'+(AppState.currentPlaylistId===p.id?' selected':'');
+    item.innerHTML=`<div class="t">${escapeHtml(p.name)}</div><div class="a">${p.items.length} itens</div>`;
+    item.addEventListener('click',()=>{AppState.currentPlaylistId=p.id; renderView();});
+    listEl.appendChild(item);
+  });
+}
+function currentPlaylist(){ return AppState.playlists.find(p=>p.id===AppState.currentPlaylistId); }
+function renderPlaylistCenter(container){
+  const pl=currentPlaylist();
+  if(!pl){ container.innerHTML='<div class="empty-hint">Selecione ou crie uma playlist à esquerda.</div>'; return; }
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Nome da playlist</label><input id="pl-name" value="${escapeHtml(pl.name)}"></div>
+    <div class="row" style="margin-bottom:12px;">
+      <select id="add-song-select" style="flex:2;">
+        <option value="">+ Adicionar música...</option>
+        ${AppState.songs.map(s=>`<option value="${s.id}">${escapeHtml(s.title)}</option>`).join('')}
+      </select>
+      <button class="btn ghost" id="add-song-btn">Adicionar</button>
+    </div>
+    <div id="playlist-items"></div>
+    <div class="transport" style="justify-content:flex-start;margin-top:16px;">
+      <button class="btn ghost sm" id="del-pl-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir playlist</button>
+    </div>
+  `;
+  container.appendChild(wrap);
+  wrap.querySelector('#pl-name').addEventListener('input',e=>{pl.name=e.target.value; saveState();});
+  wrap.querySelector('#add-song-btn').addEventListener('click',()=>{
+    const sel=wrap.querySelector('#add-song-select');
+    if(!sel.value) return;
+    const song=AppState.songs.find(s=>s.id===sel.value);
+    pl.items.push({type:'song', id:song.id, order:pl.items.length, title:song.title});
+    saveState(); renderView();
+  });
+  wrap.querySelector('#del-pl-btn').addEventListener('click',()=>{
+    if(!confirm('Excluir esta playlist?')) return;
+    AppState.playlists=AppState.playlists.filter(p=>p.id!==pl.id);
+    AppState.currentPlaylistId=null; saveState(); renderView();
+  });
+  const itemsEl=wrap.querySelector('#playlist-items');
+  if(pl.items.length===0) itemsEl.innerHTML='<div class="empty-hint">Playlist vazia. Adicione músicas acima.</div>';
+  pl.items.forEach((it,idx)=>{
+    const row=document.createElement('div');
+    row.className='pl-item';
+    row.draggable=true;
+    row.dataset.idx=idx;
+    row.innerHTML=`<i class="fa-solid fa-grip-vertical" style="color:var(--text-dim);font-size:11px;"></i>
+      <span class="pl-type">${it.type}</span>
+      <span class="pl-title">${escapeHtml(it.title||it.id)}</span>
+      <button class="pl-play-btn btn sm ghost"><i class="fa-solid fa-play"></i></button>
+      <button class="pl-del-btn"><i class="fa-solid fa-xmark"></i></button>`;
+    row.querySelector('.pl-play-btn').addEventListener('click',()=>{
+      if(it.type==='song'){ AppState.currentSongId=it.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; updatePreview(); switchView('songs'); }
+    });
+    row.querySelector('.pl-del-btn').addEventListener('click',()=>{
+      pl.items.splice(idx,1); saveState(); renderView();
+    });
+    row.addEventListener('dragstart',()=>row.classList.add('dragging'));
+    row.addEventListener('dragend',()=>{row.classList.remove('dragging'); saveState();});
+    row.addEventListener('dragover',e=>{
+      e.preventDefault();
+      const dragging=itemsEl.querySelector('.dragging');
+      if(!dragging||dragging===row) return;
+      const rect=row.getBoundingClientRect();
+      const before=(e.clientY-rect.top)<rect.height/2;
+      itemsEl.insertBefore(dragging, before?row:row.nextSibling);
+      const newOrder=[...itemsEl.children].map(c=>pl.items[Number(c.dataset.idx)]);
+      pl.items=newOrder.filter(Boolean);
+      [...itemsEl.children].forEach((c,i)=>c.dataset.idx=i);
+    });
+    itemsEl.appendChild(row);
+  });
+}
+
+/* =========================================================
+   PREVIEW / PROJECTION / STAGE
+   ========================================================= */
+function getActiveTheme(){ return AppState.themes.find(t=>t.id===AppState.activeThemeId) || AppState.themes[0]; }
+
+function currentSlideText(){
+  if(AppState.previewOverride) return AppState.previewOverride.text;
+  const song=currentSong();
+  if(song && song.slides[AppState.currentSlideIndex]) return song.slides[AppState.currentSlideIndex].text;
+  return '';
+}
+function nextSlideText(){
+  const song=currentSong();
+  if(song && song.slides[AppState.currentSlideIndex+1]) return song.slides[AppState.currentSlideIndex+1].text;
+  return '';
+}
+
+function applyThemeToEl(el,bgEl,theme){
+  el.style.fontFamily=theme.font.family;
+  el.style.fontSize=theme.font.size+'px';
+  el.style.color=theme.font.color;
+  el.style.fontWeight=theme.font.bold?'700':'400';
+  el.style.fontStyle=theme.font.italic?'italic':'normal';
+  el.style.textAlign=theme.alignment;
+  el.style.lineHeight=theme.lineHeight;
+  el.style.textShadow = theme.effects.shadow? '0 4px 18px rgba(0,0,0,.7)': 'none';
+  el.style.webkitTextStroke = theme.effects.outline? '1px rgba(0,0,0,.6)':'0';
+  if(bgEl){
+    if(theme.background.type==='color'){
+      bgEl.style.background=theme.background.value;
+      bgEl.style.backgroundImage='none';
+    } else {
+      bgEl.style.backgroundImage=`url(${theme.background.value})`;
+    }
+    bgEl.style.opacity = theme.background.opacity/100;
+  }
+}
+
+function updatePreview(){
+  const theme=getActiveTheme();
+  const text = AppState.blackout ? '' : currentSlideText();
+  const previewEl=document.getElementById('preview-text-el');
+  previewEl.textContent = text || 'Selecione um slide';
+  applyThemeToEl(previewEl,null,theme);
+  document.getElementById('live-preview').style.background = AppState.blackout?'#000': (theme.background.type==='color'?theme.background.value:'#000');
+  if(theme.background.type==='image' && !AppState.blackout){
+    document.getElementById('live-preview').style.backgroundImage=`url(${theme.background.value})`;
+    document.getElementById('live-preview').style.backgroundSize='cover';
+    document.getElementById('live-preview').style.backgroundPosition='center';
+  } else {
+    document.getElementById('live-preview').style.backgroundImage='none';
+  }
+
+  // projection overlay
+  const projText=document.getElementById('projection-text');
+  const projBg=document.getElementById('projection-bg');
+  projText.textContent = AppState.blackout? '' : text;
+  applyThemeToEl(projText,projBg,theme);
+
+  // stage view
+  const stageCur=document.getElementById('stage-current');
+  const stageNext=document.getElementById('stage-next');
+  stageCur.textContent = text;
+  stageNext.textContent = nextSlideText() ? ('Próximo: '+nextSlideText()) : '';
+  const song=currentSong();
+  document.getElementById('stage-counter').textContent = song? `${AppState.currentSlideIndex+1} / ${song.slides.length}` : '';
+
+  // update slide list highlight without full rerender (cheap)
+  document.querySelectorAll('.slide-card').forEach((c,i)=>c.classList.toggle('current', Number(c.dataset.idx)===AppState.currentSlideIndex));
+}
+
+document.getElementById('tr-next').addEventListener('click',goNextSlide);
+document.getElementById('tr-prev').addEventListener('click',goPrevSlide);
+document.getElementById('tr-blackout').addEventListener('click',()=>{AppState.blackout=!AppState.blackout; updatePreview();});
+function goNextSlide(){
+  const song=currentSong();
+  AppState.previewOverride=null;
+  if(song && AppState.currentSlideIndex < song.slides.length-1){ AppState.currentSlideIndex++; updatePreview(); if(AppState.view==='songs') renderView(); }
+}
+function goPrevSlide(){
+  const song=currentSong();
+  AppState.previewOverride=null;
+  if(song && AppState.currentSlideIndex>0){ AppState.currentSlideIndex--; updatePreview(); if(AppState.view==='songs') renderView(); }
+}
+
+document.getElementById('present-btn').addEventListener('click',()=>{
+  document.getElementById('projection-overlay').classList.add('show');
+  updatePreview();
+});
+document.getElementById('projection-overlay').addEventListener('dblclick',()=>{
+  document.getElementById('projection-overlay').classList.remove('show');
+});
+document.getElementById('stage-btn').addEventListener('click',()=>{
+  document.getElementById('stage-overlay').classList.add('show');
+  updatePreview();
+});
+document.getElementById('stage-overlay').addEventListener('dblclick',()=>{
+  document.getElementById('stage-overlay').classList.remove('show');
+});
+
+/* Keyboard shortcuts */
+document.addEventListener('keydown',(e)=>{
+  const inEditable = ['INPUT','TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if(e.key==='Escape'){
+    document.getElementById('projection-overlay').classList.remove('show');
+    document.getElementById('stage-overlay').classList.remove('show');
+    if(document.fullscreenElement) document.exitFullscreen();
+    return;
+  }
+  if(inEditable) return;
+  if(e.key===' '){ e.preventDefault(); goNextSlide(); }
+  else if(e.key==='ArrowRight'){ goNextSlide(); }
+  else if(e.key==='ArrowLeft'){ goPrevSlide(); }
+  else if(e.key==='b' || e.key==='B'){ AppState.blackout=!AppState.blackout; updatePreview(); }
+  else if(e.key==='f' || e.key==='F'){
+    const overlay=document.getElementById('projection-overlay');
+    if(overlay.classList.contains('show')){
+      if(!document.fullscreenElement) overlay.requestFullscreen().catch(()=>{});
+      else document.exitFullscreen();
+    }
+  } else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='f'){
+    e.preventDefault();
+    if(AppState.view==='bible'){
+      const input=document.getElementById('bible-search-input');
+      if(input) input.focus();
+    }
+  } else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){
+    e.preventDefault(); saveState(); toast('Salvo');
+  }
+});
+
+/* =========================================================
+   SEED — músicas solicitadas (sem letra, para colar depois)
+   ========================================================= */
+function seedDefaultSongs(){
+  const wanted = [
+    {title:'Clamo Jesus', artist:'', slideLabels:['Slide 1']},
+    {title:'Digno de tudo (Worthy of it all)', artist:'', slideLabels:['Slide 1']},
+    {title:'Digno de todo louvor', artist:'Regis', slideLabels:['Slide 1']},
+    {title:'Ao olhar pra ti', artist:'Regis', slideLabels:['Slide 1']},
+    {title:'Cristo', artist:'Alessandro V', slideLabels:['Refrão','Ponte']},
+    {title:'Doce presença', artist:'', slideLabels:['Refrão']},
+  ];
+  let added=0;
+  wanted.forEach(w=>{
+    const exists = AppState.songs.some(s=>s.title.trim().toLowerCase()===w.title.trim().toLowerCase());
+    if(exists) return;
+    const song={
+      id:uid(), title:w.title, artist:w.artist, notes:'', lyrics:'',
+      slides:w.slideLabels.map((label,i)=>({id:uid(),text:`[${label} — cole a letra aqui]`,order:i})),
+      themeId:null, history:[], createdAt:Date.now()
+    };
+    AppState.songs.push(song);
+    added++;
+  });
+  if(added>0) saveState();
+}
+
+/* =========================================================
+   BOOTSTRAP
+   ========================================================= */
+loadState();          // cache local, pra abrir instantâneo mesmo offline
+seedDefaultSongs();
+renderView();
+updatePreview();
+initCloudSync();      // busca versão mais recente no Firestore e liga o tempo real
+</script>
+</body>
+</html>
