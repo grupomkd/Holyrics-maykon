@@ -283,21 +283,54 @@ body.display-mode #display-live-dot{display:flex;}
 #display-live-dot span{width:6px;height:6px;border-radius:50%;background:#2ecc71;display:inline-block;}
 
 /* ===== RESPONSIVO / MOBILE ===== */
+#bottom-tabs{ display:none; }
+#mobile-back-btn, #mobile-title{ display:none; }
+
 @media (max-width: 860px){
-  body{ overflow-y:auto; height:auto; min-height:100%; }
+  html,body{ height:100%; overflow:hidden; }
   #topbar{
-    height:auto; flex-wrap:wrap; padding:6px 8px; row-gap:4px;
+    height:52px; padding:0 10px; gap:8px; flex-wrap:nowrap;
   }
-  .tab-btn{ flex:1 1 auto; justify-content:center; font-size:12px; padding:11px 6px; min-width:70px; }
-  #topbar-spacer{ flex-basis:100%; height:0; }
-  .topbar-action, #present-btn{ font-size:12px; padding:10px 12px; flex:1 1 auto; justify-content:center; text-align:center; }
-  #sync-status{ order:-1; flex-basis:100%; justify-content:center; padding:4px 0; font-size:12px; }
-  #main{ flex-direction:column; overflow-y:visible; height:auto; }
-  .panel{ width:100% !important; flex:none; }
-  #panel-left{ border-right:none; border-bottom:1px solid var(--border); }
-  #panel-center{ border-bottom:1px solid var(--border); min-height:260px; }
-  #panel-right{ border-left:none; }
-  .panel-body{ max-height:60vh; }
+  #topbar .tab-btn{ display:none; } /* substituídas pela barra de baixo */
+  #topbar-spacer{ display:none; }
+  .topbar-action{ display:none; } /* Modo TV / Retorno viram ícones no menu "Mais" (aba Temas) */
+  #present-btn{ font-size:12px; padding:9px 12px; margin-left:auto; }
+  #sync-status{ font-size:0; padding:0; gap:0; }
+  #sync-status #sync-dot{ width:9px; height:9px; }
+  #mobile-back-btn{
+    display:flex; align-items:center; justify-content:center;
+    width:34px; height:34px; border-radius:8px; font-size:16px; color:var(--text); flex-shrink:0;
+  }
+  #mobile-back-btn.show{ display:flex; }
+  #mobile-back-btn:not(.show){ display:none; }
+  #mobile-title{
+    display:block; font-weight:700; font-size:15px; white-space:nowrap; flex-shrink:0;
+  }
+
+  #main{
+    position:fixed; top:52px; left:0; right:0; bottom:64px;
+    flex-direction:column; height:auto;
+  }
+  .panel{ width:100% !important; flex:none; height:100%; display:none !important; }
+  body[data-mobile-pane="left"] #panel-left{ display:flex !important; }
+  body[data-mobile-pane="center"] #panel-center{ display:flex !important; }
+  body[data-mobile-pane="right"] #panel-right{ display:flex !important; }
+  .panel-header{ display:none; } /* título já aparece no topo mobile */
+  .panel-body{ max-height:none; flex:1; }
+  #panel-left, #panel-center, #panel-right{ border:none !important; }
+
+  #bottom-tabs{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:500;
+    background:var(--surface); border-top:1px solid var(--border);
+    padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+  }
+  .bt-item{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    font-size:10px; color:var(--text-dim); padding:6px 2px; border-radius:8px;
+  }
+  .bt-item i{ font-size:17px; }
+  .bt-item.active{ color:var(--accent); }
+
   #book-grid{ grid-template-columns:repeat(auto-fill,minmax(58px,1fr)); gap:8px; }
   .book-chip{ padding:13px 4px; font-size:13px; }
   .chapter-grid,.verse-grid{ grid-template-columns:repeat(auto-fill,minmax(46px,1fr)); gap:8px; }
@@ -310,9 +343,12 @@ body.display-mode #display-live-dot{display:flex;}
 }
 </style>
 </head>
+
 <body>
 
 <div id="topbar">
+  <button id="mobile-back-btn" class="hidden"><i class="fa-solid fa-chevron-left"></i></button>
+  <span id="mobile-title" class="hidden"></span>
   <button class="tab-btn active" data-view="bible"><i class="fa-solid fa-book-bible"></i> Bíblia</button>
   <button class="tab-btn" data-view="songs"><i class="fa-solid fa-music"></i> Músicas</button>
   <button class="tab-btn" data-view="themes"><i class="fa-solid fa-palette"></i> Temas</button>
@@ -372,6 +408,15 @@ body.display-mode #display-live-dot{display:flex;}
     </div>
   </div>
 
+</div>
+
+<!-- BOTTOM TAB BAR (só mobile) -->
+<div id="bottom-tabs">
+  <button class="bt-item active" data-view="bible"><i class="fa-solid fa-book-bible"></i><span>Bíblia</span></button>
+  <button class="bt-item" data-view="songs"><i class="fa-solid fa-music"></i><span>Músicas</span></button>
+  <button class="bt-item" data-view="playlist"><i class="fa-solid fa-list-check"></i><span>Playlist</span></button>
+  <button class="bt-item" data-pane="right"><i class="fa-solid fa-tv"></i><span>Ao Vivo</span></button>
+  <button class="bt-item" data-view="themes"><i class="fa-solid fa-palette"></i><span>Temas</span></button>
 </div>
 
 <!-- PROJECTION OVERLAY -->
@@ -669,6 +714,7 @@ const AppState = {
   textHidden: false,
   media: [],
   activeMediaId: null,
+  mobileActiveTab: 'bible',
 };
 
 function saveState(){
@@ -822,6 +868,52 @@ async function fetchBibleBook(version, bookId){
 }
 
 /* =========================================================
+   NAVEGAÇÃO MOBILE (uma tela por vez, estilo app)
+   ========================================================= */
+function isMobileView(){ return window.matchMedia('(max-width: 860px)').matches; }
+function setMobilePane(pane){
+  if(!isMobileView()) return;
+  document.body.dataset.mobilePane = pane;
+  const backBtn=document.getElementById('mobile-back-btn');
+  const titleEl=document.getElementById('mobile-title');
+  if(backBtn) backBtn.classList.toggle('show', pane==='center');
+  const titles={bible:'Bíblia',songs:'Músicas',themes:'Temas',playlist:'Playlist'};
+  if(titleEl) titleEl.textContent = pane==='right' ? 'Ao Vivo' : (titles[AppState.view]||'');
+  document.querySelectorAll('.bt-item').forEach(b=>{
+    const isActive = pane==='right' ? b.dataset.pane==='right' : (b.dataset.view===AppState.view && AppState.mobileActiveTab!=='right');
+    b.classList.toggle('active', isActive);
+  });
+}
+function updateMobilePaneAuto(){
+  if(!isMobileView()) return;
+  if(AppState.mobileActiveTab==='right'){ setMobilePane('right'); return; }
+  let hasDetail=false;
+  if(AppState.view==='bible') hasDetail=!!AppState.bible.book;
+  else if(AppState.view==='songs') hasDetail=!!AppState.currentSongId;
+  else if(AppState.view==='playlist') hasDetail=!!AppState.currentPlaylistId;
+  else if(AppState.view==='themes') hasDetail=!!AppState.editingThemeId;
+  setMobilePane(hasDetail?'center':'left');
+}
+document.querySelectorAll('.bt-item').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(btn.dataset.pane==='right'){
+      AppState.mobileActiveTab='right';
+      setMobilePane('right');
+    } else {
+      AppState.mobileActiveTab = btn.dataset.view;
+      switchView(btn.dataset.view);
+    }
+  });
+});
+document.getElementById('mobile-back-btn').addEventListener('click',()=>{
+  if(AppState.view==='bible'){ AppState.bible.book=null; }
+  else if(AppState.view==='songs'){ AppState.currentSongId=null; }
+  else if(AppState.view==='playlist'){ AppState.currentPlaylistId=null; }
+  else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
+  renderView();
+});
+
+/* =========================================================
    RENDER: TOP BAR / VIEW SWITCH
    ========================================================= */
 document.querySelectorAll('.tab-btn').forEach(btn=>{
@@ -829,6 +921,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 });
 function switchView(view){
   AppState.view = view;
+  AppState.mobileActiveTab = view;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   renderView();
 }
@@ -862,6 +955,7 @@ function renderView(){
     renderPlaylistCenter(centerBody);
   }
   renderThemeSelect();
+  updateMobilePaneAuto();
 }
 
 /* =========================================================
