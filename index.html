@@ -347,8 +347,8 @@ body.display-mode #display-live-dot{display:flex;}
 <body>
 
 <div id="topbar">
-  <button id="mobile-back-btn" class="hidden"><i class="fa-solid fa-chevron-left"></i></button>
-  <span id="mobile-title" class="hidden"></span>
+  <button id="mobile-back-btn"><i class="fa-solid fa-chevron-left"></i></button>
+  <span id="mobile-title"></span>
   <button class="tab-btn active" data-view="bible"><i class="fa-solid fa-book-bible"></i> Bíblia</button>
   <button class="tab-btn" data-view="songs"><i class="fa-solid fa-music"></i> Músicas</button>
   <button class="tab-btn" data-view="themes"><i class="fa-solid fa-palette"></i> Temas</button>
@@ -894,11 +894,21 @@ function updateMobilePaneAuto(){
   else if(AppState.view==='themes') hasDetail=!!AppState.editingThemeId;
   setMobilePane(hasDetail?'center':'left');
 }
+function clearCurrentDetail(){
+  if(AppState.view==='bible'){ AppState.bible.book=null; }
+  else if(AppState.view==='songs'){ AppState.currentSongId=null; }
+  else if(AppState.view==='playlist'){ AppState.currentPlaylistId=null; }
+  else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
+}
 document.querySelectorAll('.bt-item').forEach(btn=>{
   btn.addEventListener('click',()=>{
     if(btn.dataset.pane==='right'){
       AppState.mobileActiveTab='right';
       setMobilePane('right');
+    } else if(btn.dataset.view===AppState.view && document.body.dataset.mobilePane==='center'){
+      // tocou de novo na aba já aberta (com um item selecionado) -> volta pra lista
+      clearCurrentDetail();
+      renderView();
     } else {
       AppState.mobileActiveTab = btn.dataset.view;
       switchView(btn.dataset.view);
@@ -906,10 +916,7 @@ document.querySelectorAll('.bt-item').forEach(btn=>{
   });
 });
 document.getElementById('mobile-back-btn').addEventListener('click',()=>{
-  if(AppState.view==='bible'){ AppState.bible.book=null; }
-  else if(AppState.view==='songs'){ AppState.currentSongId=null; }
-  else if(AppState.view==='playlist'){ AppState.currentPlaylistId=null; }
-  else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
+  clearCurrentDetail();
   renderView();
 });
 
