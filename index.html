@@ -420,6 +420,48 @@ const firebaseConfig = {
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
+
+// Vídeo de fundo: guardado só neste computador (IndexedDB), não sincroniza
+// entre aparelhos — evita precisar do plano pago do Firebase Storage.
+function openMediaDB(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open('holyrics_local_media', 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore('videos'); };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function saveLocalVideo(key, blob){
+  const db = await openMediaDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('videos','readwrite');
+    tx.objectStore('videos').put(blob, key);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+async function getLocalVideo(key){
+  const db = await openMediaDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('videos','readonly');
+    const req = tx.objectStore('videos').get(key);
+    req.onsuccess=()=>resolve(req.result || null);
+    req.onerror=()=>reject(req.error);
+  });
+}
+const localVideoUrlCache = {};
+function resolveVideoSrc(theme){
+  if(theme.background.type!=='video' || !theme.background.value) return null;
+  if(theme.background.value.startsWith('local:')){
+    const key = theme.background.value.slice(6);
+    if(localVideoUrlCache[key]) return localVideoUrlCache[key];
+    getLocalVideo(key).then(blob=>{
+      if(blob){ localVideoUrlCache[key]=URL.createObjectURL(blob); updatePreview(); }
+    }).catch(()=>{});
+    return null; // ainda carregando, ou vídeo não existe neste aparelho
+  }
+  return theme.background.value; // URL externa/legada
+}
 const songsDocRef = doc(db,'holyrics_data','songs');
 const themesDocRef = doc(db,'holyrics_data','themes');
 const themesCollRef = collection(db,'holyrics_themes');
@@ -1234,11 +1276,15 @@ function renderThemesCenter(container){
     reader.onload=ev=>{ theme.background.type='image'; theme.background.value=ev.target.result; apply(); toast('Imagem de fundo aplicada'); };
     reader.readAsDataURL(file);
   });
-  q('#th-bg-video-file').addEventListener('change',e=>{
+  q('#th-bg-video-file').addEventListener('change',async e=>{
     const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=ev=>{ theme.background.type='video'; theme.background.value=ev.target.result; apply(); toast('Vídeo de fundo aplicado (sem áudio)'); };
-    reader.readAsDataURL(file);
+    toast('Salvando vídeo neste computador...');
+    try{
+      await saveLocalVideo(theme.id, file);
+      theme.background.type='video'; theme.background.value='local:'+theme.id;
+      apply();
+      toast('Vídeo salvo! (fica só neste computador, não sincroniza pro celular)');
+    }catch(err){ console.error(err); toast('Erro ao salvar vídeo neste computador.'); }
   });
   q('#th-font-color').addEventListener('input',e=>{theme.font.color=e.target.value; apply();});
   q('#th-font-size').addEventListener('input',e=>{theme.font.size=Number(e.target.value); apply();});
@@ -1424,8 +1470,9 @@ function nextSlideText(){
 function applyBackground(bgEl, videoEl, dimEl, theme, blackout){
   if(videoEl){
     videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
-    if(!blackout && theme.background.type==='video' && theme.background.value){
-      if(videoEl.getAttribute('src')!==theme.background.value) videoEl.src=theme.background.value;
+    const videoSrc = !blackout ? resolveVideoSrc(theme) : null;
+    if(videoSrc){
+      if(videoEl.getAttribute('src')!==videoSrc) videoEl.src=videoSrc;
       videoEl.style.display='block';
       if(videoEl.paused) videoEl.play().catch(()=>{});
     } else {
