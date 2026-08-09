@@ -389,6 +389,7 @@ body.display-mode #display-live-dot{display:flex;}
         <video id="preview-bg-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;opacity:0;"></video>
         <div id="preview-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
         <div class="preview-text" id="preview-text-el">Selecione um slide</div>
+        <div id="preview-media-backdrop" style="position:absolute;inset:0;background:#000;z-index:4;display:none;"></div>
         <img id="preview-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
         <video id="preview-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
         <video id="preview-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
@@ -435,6 +436,7 @@ body.display-mode #display-live-dot{display:flex;}
   <video id="projection-bg-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;opacity:0;"></video>
   <div id="projection-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
   <div id="projection-text">Aguardando...</div>
+  <div id="projection-media-backdrop" style="position:absolute;inset:0;background:#000;z-index:4;display:none;"></div>
   <img id="projection-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
   <video id="projection-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
   <video id="projection-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
@@ -2460,27 +2462,36 @@ function updatePreview(){
   const theme=getActiveTheme();
   const hide = AppState.blackout || AppState.textHidden;
   const text = hide ? '' : currentSlideText();
+
+  // O que ocupa a tela inteira precisa ser decidido antes do fundo. Durante a
+  // mesclagem entre um loop e outro os dois elementos de vídeo ficam
+  // semitransparentes, e sem uma base preta por baixo o fundo do tema e o
+  // texto do slide apareciam atravessando no meio da transição.
+  const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
+  const videoBruto = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
+    : (!activeMedia && !AppState.blackout ? AppState.sermonVideo : null);   // aviso tem prioridade sobre a pregação
+  const videoNaTela = resolverUrlVideo(videoBruto);
+  const imagemNaTela = videoNaTela ? null
+    : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
+  const coberturaTotal = !!(videoNaTela || imagemNaTela);
   const previewEl=document.getElementById('preview-text-el');
   setSlideText(previewEl, text || (AppState.textHidden && !AppState.blackout ? '' : 'Selecione um slide'), theme);
   const previewBoxWidth = document.getElementById('live-preview').clientWidth || 320;
   const previewScale = previewBoxWidth / 1280; // 1280px = referência da resolução de projeção
   applyThemeToEl(previewEl,null,theme,previewScale);
-  applyBackground(document.getElementById('live-preview'), document.getElementById('preview-bg-video'), document.getElementById('preview-bg-dim'), theme, AppState.blackout);
+  applyBackground(document.getElementById('live-preview'), document.getElementById('preview-bg-video'), document.getElementById('preview-bg-dim'), theme, AppState.blackout || coberturaTotal);
 
   // projection overlay
   const projText=document.getElementById('projection-text');
   const projBg=document.getElementById('projection-bg');
   setSlideText(projText, hide ? '' : text, theme);
   applyThemeToEl(projText,null,theme);
-  applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout);
+  applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout || coberturaTotal);
 
-  const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
-  // aviso lateral tem prioridade sobre o item da pregação
-  const videoBruto = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
-    : (!activeMedia && !AppState.blackout ? AppState.sermonVideo : null);
-  const videoNaTela = resolverUrlVideo(videoBruto);
-  const imagemNaTela = videoNaTela ? null
-    : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
+  ['preview-media-backdrop','projection-media-backdrop'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.style.display = coberturaTotal ? 'block' : 'none';
+  });
   [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
     const img=document.getElementById(id);
     if(imagemNaTela){ if(img.getAttribute('src')!==imagemNaTela) img.src=imagemNaTela; img.style.display='block'; }
