@@ -1143,6 +1143,184 @@ function setPreviewFromBible(bookName,chapter,verseNumber,text){
 }
 
 /* =========================================================
+   DIVISÃO INTELIGENTE DE SLIDES
+   Letra copiada de site de cifra/letra vem sem nenhuma linha em
+   branco, então o corte por parágrafo não tem onde quebrar e a
+   música inteira vira um slide só. Aqui tem duas saídas:
+   heurística local (sempre disponível, offline, de graça) e um
+   refino opcional pela API do Gemini, que é melhor em achar onde
+   o refrão começa e termina.
+   ========================================================= */
+const SLIDE_LINHAS_IDEAL = 4;
+const SLIDE_MAX_LINHAS   = 6;
+const SLIDE_MAX_CHARS    = 220;
+
+// [Refrão], (Ponte), Verso 2: … — linhas que rotulam seção e não devem ir pro telão.
+// O rótulo tem que estar entre colchetes/parênteses OU terminar em dois-pontos: sem
+// essa exigência, uma linha de letra que começa com "Final", "Parte" ou "Refrão"
+// seria apagada em silêncio. Melhor deixar passar um rótulo (visível, fácil de
+// apagar) do que sumir com um verso.
+const SECAO_KW = 'refr[ãa]o|chorus|verso|verse|ponte|bridge|pr[ée]\\s*-?\\s*refr[ãa]o|pre\\s*-?\\s*chorus|estrofe|parte|intro|final|ending|tag|coda';
+const RE_SECAO_DELIM = new RegExp(`^\\s*[\\[\\(]\\s*(?:${SECAO_KW})\\b[^\\]\\)]*[\\]\\)]\\s*$`,'i');
+const RE_SECAO_DOISPT = new RegExp(`^\\s*(?:${SECAO_KW})\\s*\\d*\\s*:\\s*$`,'i');
+function ehRotuloSecao(l){ return RE_SECAO_DELIM.test(l) || RE_SECAO_DOISPT.test(l); }
+
+function normLinha(s){
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+          .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+// as 4 primeiras palavras bastam pra reconhecer que duas linhas são a mesma
+// parte do refrão mesmo com um eco diferente no fim
+function chaveBloco(s){ return normLinha(s).split(' ').slice(0,4).join(' '); }
+
+const RE_EN=/\b(you|are|the|and|of|to|is|in|for|all|we|my|your|that|with|from|worthy|holy|lord|king|glory|praise)\b/g;
+const RE_PT=/\b(que|nao|com|para|pra|teu|tua|seu|sua|nos|es|de|da|do|em|no|na|te|se|meu|minha|senhor|deus|santo|gloria|digno|amor|noite)\b/g;
+function idiomaLinha(s){
+  const n=normLinha(s);
+  const en=(n.match(RE_EN)||[]).length, pt=(n.match(RE_PT)||[]).length;
+  if(en>pt) return 'en';
+  if(pt>en) return 'pt';
+  return '?';
+}
+
+// Programação dinâmica: parte a lista de linhas nos blocos que somam o menor
+// custo, onde o custo pune slide fora do tamanho ideal e corte em lugar ruim.
+function dividirLinhas(linhas){
+  const n=linhas.length;
+  if(n===0) return [];
+  if(n<=SLIDE_LINHAS_IDEAL && linhas.join('\n').length<=SLIDE_MAX_CHARS) return [linhas.join('\n')];
+
+  const chaves=linhas.map(chaveBloco);
+  const cont={};
+  chaves.forEach(k=>{ cont[k]=(cont[k]||0)+1; });
+  const rep=chaves.map(k=>cont[k]>1);          // linha que se repete = provável refrão
+  const idioma=linhas.map(idiomaLinha);
+
+  // custo de cortar ANTES da linha i (negativo = bom lugar pra cortar)
+  function custoCorte(i){
+    const l=linhas[i], ant=linhas[i-1];
+    let c=0;
+    if(/^[\(\[]/.test(l)) c+=8;                                       // eco de backing vocal: cola em cima
+    if(/[,;:]$/.test(ant)) c+=5;                                      // frase interrompida no meio
+    if(/^(e|mas|que|pois|por|pra|para|com|de|da|do|em|no|na|and|but|for|to|of|the)\b/i.test(l)) c+=3;
+    if(/[.!?]$/.test(ant)) c-=3;                                      // fim de frase
+    if(rep[i] && !rep[i-1]) c-=9;                                     // aqui começa o refrão
+    if(!rep[i] && rep[i-1]) c-=6;                                     // aqui o refrão acabou
+    if(idioma[i]!=='?' && idioma[i-1]!=='?' && idioma[i]!==idioma[i-1]) c-=7;  // troca de idioma
+    return c;
+  }
+
+  const custo=new Array(n+1).fill(Infinity), vemDe=new Array(n+1).fill(0);
+  custo[0]=0;
+  for(let j=1;j<=n;j++){
+    for(let i=Math.max(0,j-SLIDE_MAX_LINHAS); i<j; i++){
+      if(custo[i]===Infinity) continue;
+      const tam=j-i;
+      if(tam===1 && i!==0 && j!==n) continue;   // slide de uma linha só no meio da música, não
+      if(tam>2 && linhas.slice(i,j).join('\n').length>SLIDE_MAX_CHARS) continue;
+      let c=custo[i]+Math.abs(tam-SLIDE_LINHAS_IDEAL)*4;
+      if(i>0) c+=custoCorte(i);
+      if(c<custo[j]){ custo[j]=c; vemDe[j]=i; }
+    }
+  }
+  const blocos=[];
+  for(let j=n;j>0;){ const i=vemDe[j]; blocos.unshift(linhas.slice(i,j).join('\n')); j=i; }
+  return blocos;
+}
+
+function dividirPorSecoes(linhas){
+  const blocos=[]; let atual=[];
+  linhas.forEach(l=>{
+    if(ehRotuloSecao(l)){ if(atual.length) blocos.push(atual); atual=[]; return; }  // rótulo não vai pro telão
+    atual.push(l);
+  });
+  if(atual.length) blocos.push(atual);
+  return blocos.flatMap(b=>dividirLinhas(b));
+}
+
+function smartSplitLyrics(texto){
+  const bruto=String(texto||'').replace(/\r/g,'');
+  if(!bruto.trim()) return [];
+  // se a pessoa já separou com linha em branco, respeita a separação dela —
+  // só reparte os blocos que ficariam grandes demais no telão
+  if(/\n\s*\n/.test(bruto)){
+    return bruto.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean)
+      .flatMap(b=>dividirLinhas(b.split('\n').map(l=>l.trim()).filter(Boolean)));
+  }
+  const linhas=bruto.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(linhas.some(ehRotuloSecao)) return dividirPorSecoes(linhas);
+  return dividirLinhas(linhas);
+}
+
+/* ----- refino opcional pelo Gemini (nível gratuito) -----
+   A chave fica no localStorage deste aparelho, nunca no repositório:
+   o site é público, chave no código seria chave roubada. */
+const GEMINI_MODELOS=['gemini-2.5-flash','gemini-2.0-flash'];
+
+function geminiKey(){ return localStorage.getItem('holyrics_gemini_key')||''; }
+function pedirGeminiKey(){
+  const k=prompt('Cole a chave da API do Gemini (gratuita em aistudio.google.com/apikey).\n\nEla fica salva só neste aparelho e não vai pro GitHub.', geminiKey());
+  if(k===null) return '';
+  const limpo=k.trim();
+  localStorage.setItem('holyrics_gemini_key', limpo);
+  return limpo;
+}
+
+async function chamarGemini(prompt, key){
+  let ultimoErro='';
+  for(const modelo of GEMINI_MODELOS){
+    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(key)}`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        contents:[{parts:[{text:prompt}]}],
+        generationConfig:{temperature:0, responseMimeType:'application/json'}
+      })
+    });
+    if(res.ok){
+      const data=await res.json();
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+    ultimoErro=`${res.status} ${(await res.text()).slice(0,160)}`;
+    if(res.status!==404) break;   // 404 = modelo aposentado, vale tentar o próximo
+  }
+  throw new Error(ultimoErro||'falha na chamada');
+}
+
+// A IA recebe as linhas NUMERADAS e responde só com os números agrupados.
+// Assim ela não tem como reescrever, traduzir ou inventar letra — e a
+// conferência abaixo garante que a sequência voltou inteira e na ordem.
+async function aiSplitLyrics(texto){
+  const linhas=String(texto||'').replace(/\r/g,'').split('\n').map(l=>l.trim()).filter(Boolean);
+  if(linhas.length<2) return null;
+  const key=geminiKey()||pedirGeminiKey();
+  if(!key) return null;
+
+  const prompt=`Você organiza letras de música para projeção no telão de uma igreja.
+Abaixo estão as linhas de uma letra, numeradas. Agrupe as linhas em slides.
+
+Regras:
+- Cada slide tem de 2 a 6 linhas; 4 é o ideal.
+- Use somente os números. Não reescreva, não traduza, não corrija, não invente linha.
+- Toda linha aparece em exatamente um slide, na ordem original.
+- O que se canta junto fica junto: refrão, ponte e estrofe não podem ser partidos no meio de uma frase.
+- Linha entre parênteses é eco de backing vocal: fica no mesmo slide da linha anterior.
+
+Responda só com JSON no formato {"slides":[[1,2,3,4],[5,6,7]]}.
+
+${linhas.map((l,i)=>`${i+1}. ${l}`).join('\n')}`;
+
+  const bruto=await chamarGemini(prompt, key);
+  let dados;
+  try{ dados=JSON.parse(bruto); }catch(e){ throw new Error('a resposta não veio em JSON'); }
+  const grupos=Array.isArray(dados)?dados:(dados&&dados.slides);
+  if(!Array.isArray(grupos)) throw new Error('resposta sem a lista de slides');
+
+  const plana=grupos.flat().map(Number);
+  if(plana.length!==linhas.length || plana.some((v,i)=>v!==i+1)) return null;  // mexeu na letra: descarta
+  return grupos.filter(g=>g.length).map(g=>g.map(i=>linhas[i-1]).join('\n'));
+}
+
+/* =========================================================
    SONGS MODULE
    ========================================================= */
 function renderSongsLeft(container){
@@ -1186,11 +1364,12 @@ function renderSongsCenter(container){
       <div class="field"><label>Artista / Autor</label><input id="f-artist" value="${escapeHtml(song.artist||'')}"></div>
     </div>
     <div class="field"><label>Anotações</label><input id="f-notes" value="${escapeHtml(song.notes||'')}"></div>
-    <div class="field"><label>Letra completa (separe estrofes com linha em branco para gerar slides automaticamente)</label>
+    <div class="field"><label>Letra completa (pode colar direto do site — se não tiver linha em branco, o corte automático descobre sozinho onde quebrar)</label>
       <textarea id="f-lyrics" style="min-height:140px;">${escapeHtml(song.lyrics||'')}</textarea>
     </div>
     <div class="row" style="margin-bottom:14px;">
       <button class="btn" id="auto-split-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar slides automaticamente</button>
+      <button class="btn ghost" id="ai-split-btn" title="Usa a API gratuita do Gemini para achar o corte certo"><i class="fa-solid fa-robot"></i> Cortar com IA</button>
       <button class="btn ghost" id="add-slide-btn"><i class="fa-solid fa-plus"></i> Slide em branco</button>
       <button class="btn ghost" id="delete-song-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir música</button>
     </div>
@@ -1203,10 +1382,31 @@ function renderSongsCenter(container){
   wrap.querySelector('#f-artist').addEventListener('input',e=>{song.artist=e.target.value; saveState(); saveSongCloud(song);});
   wrap.querySelector('#f-notes').addEventListener('input',e=>{song.notes=e.target.value; saveState(); saveSongCloud(song);});
   wrap.querySelector('#f-lyrics').addEventListener('input',e=>{song.lyrics=e.target.value; saveState(); saveSongCloud(song);});
+  function aplicarSlides(partes, msg){
+    if(!partes || !partes.length){ toast('Cole a letra no campo acima primeiro.'); return; }
+    song.slides = partes.map((text,i)=>({id:uid(),text,order:i}));
+    saveState(); saveSongCloud(song); renderView();
+    toast(msg || `${partes.length} slides gerados`);
+  }
   wrap.querySelector('#auto-split-btn').addEventListener('click',()=>{
-    const parts=(song.lyrics||'').split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean);
-    song.slides = parts.map((text,i)=>({id:uid(),text,order:i}));
-    saveState(); saveSongCloud(song); renderView(); toast(`${parts.length} slides gerados`);
+    aplicarSlides(smartSplitLyrics(song.lyrics||''));
+  });
+  wrap.querySelector('#ai-split-btn').addEventListener('click',async e=>{
+    const btn=e.currentTarget, antes=btn.innerHTML;
+    btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> Cortando…';
+    try{
+      const partes=await aiSplitLyrics(song.lyrics||'');
+      if(partes) aplicarSlides(partes, `${partes.length} slides cortados pela IA`);
+      else{
+        btn.disabled=false; btn.innerHTML=antes;
+        if(geminiKey()) aplicarSlides(smartSplitLyrics(song.lyrics||''), 'A IA mexeu na letra, descartei. Usei o corte automático.');
+      }
+    }catch(err){
+      console.error('Gemini:', err);
+      btn.disabled=false; btn.innerHTML=antes;
+      toast('IA indisponível ('+String(err.message).slice(0,50)+'). Usando o corte automático.');
+      aplicarSlides(smartSplitLyrics(song.lyrics||''));
+    }
   });
   wrap.querySelector('#add-slide-btn').addEventListener('click',()=>{
     song.slides.push({id:uid(),text:'Novo slide',order:song.slides.length});
@@ -1227,6 +1427,7 @@ function renderSongsCenter(container){
     card.dataset.idx=idx;
     card.innerHTML=`<div class="slide-idx">Slide ${idx+1}</div>
       <div class="slide-actions">
+        <button class="split-btn" title="Dividir este slide"><i class="fa-solid fa-scissors"></i></button>
         <button class="dup-btn" title="Duplicar"><i class="fa-solid fa-copy"></i></button>
         <button class="del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -1250,6 +1451,16 @@ function renderSongsCenter(container){
       if(e.target.closest('.slide-actions')) return;
       if(e.target.closest('.slide-content')) return; // deixa o clique focar o textarea sem re-renderizar
       AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
+    });
+    card.querySelector('.split-btn').addEventListener('click',(e)=>{
+      e.stopPropagation();
+      const partes=smartSplitLyrics(textarea.value);
+      if(partes.length<2){ toast('Este slide já cabe no telão.'); return; }
+      slide.text=partes[0];
+      song.slides.splice(idx+1,0,...partes.slice(1).map(t=>({id:uid(),text:t,order:0})));
+      song.slides.forEach((s,i)=>{ s.order=i; });
+      saveState(); saveSongCloud(song); renderView();
+      toast(`Dividido em ${partes.length} slides`);
     });
     card.querySelector('.dup-btn').addEventListener('click',(e)=>{
       e.stopPropagation();
