@@ -623,6 +623,7 @@ function pushLiveState(){
       overrideText: AppState.previewOverride ? AppState.previewOverride.text : null,
       activeMediaId: AppState.activeMediaId || null,
       sermonImage: AppState.sermonImage || null,
+      sermonVideo: AppState.sermonVideo || null,
       sermonItemId: AppState.liveSermonItemId || null,
       updatedAt: Date.now(),
     }).catch(err=>console.error('Erro ao enviar estado ao vivo:', err));
@@ -654,6 +655,7 @@ async function initTvMode(){
     AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
     AppState.activeMediaId = d.activeMediaId || null;
     AppState.sermonImage = d.sermonImage || null;
+    AppState.sermonVideo = d.sermonVideo || null;
     AppState.liveSermonItemId = d.sermonItemId || null;
     applyLiveToPreview();
   });
@@ -744,6 +746,7 @@ const AppState = {
   sermonSlides: {},      // slideId -> dataUrl, carregado sob demanda
   liveSermonItemId: null, // qual item da pregação está na tela
   sermonImage: null,      // dataUrl da imagem no ar, se houver
+  sermonVideo: null,      // url do vídeo da pregação no ar, se houver
   mobileActiveTab: 'bible',
 };
 
@@ -2032,6 +2035,7 @@ function renderSermonCenter(container){
     <div class="row" style="margin-bottom:6px;flex-wrap:wrap;">
       <button class="btn" id="sm-pdf-btn"><i class="fa-solid fa-file-pdf"></i> Importar PDF</button>
       <button class="btn ghost" id="sm-img-btn"><i class="fa-solid fa-image"></i> Imagens</button>
+      <button class="btn ghost" id="sm-video-btn"><i class="fa-solid fa-film"></i> Vídeo</button>
       <button class="btn ghost" id="sm-text-btn"><i class="fa-solid fa-align-left"></i> Texto</button>
       <button class="btn ghost" id="sm-song-btn"><i class="fa-solid fa-music"></i> Música</button>
       <button class="btn ghost" id="sm-bible-btn"><i class="fa-solid fa-book-bible"></i> Versículo</button>
@@ -2063,6 +2067,15 @@ function renderSermonCenter(container){
     sermon.items=(sermon.items||[]).concat(novos);
     gravar(); renderView();
   };
+  q('#sm-video-btn').addEventListener('click',()=>{
+    // igual ao aviso em vídeo: entra por link, porque arquivo de vídeo não cabe
+    // no documento do Firestore
+    const url=(prompt('Cole o link do vídeo.\n\nEle roda em loop com mesclagem enquanto estiver no ar.','')||'').trim();
+    if(!url) return;
+    if(!/^(https?:\/\/|\.?\/|videos\/)/i.test(url)){ toast('Cole o endereço completo, começando com https://'); return; }
+    const nome=((prompt('Nome pra identificar na sequência:','Vídeo')||'').trim())||'Vídeo';
+    acrescentar([{id:uid(), type:'video', url, name:nome}]);
+  });
   q('#sm-text-btn').addEventListener('click',()=>{
     const texto=prompt('Texto do slide (Enter separa as linhas):','');
     if(texto===null || !texto.trim()) return;
@@ -2130,9 +2143,14 @@ function renderSermonCenter(container){
     const row=document.createElement('div');
     row.className='pl-item'+(noAr?' no-ar':'');
     row.draggable=true; row.dataset.idx=idx;
-    const mini = it.type==='image' && AppState.sermonSlides[it.slideId]
-      ? `<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`
-      : `<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
+    let mini;
+    if(it.type==='image' && AppState.sermonSlides[it.slideId]){
+      mini=`<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`;
+    } else if(it.type==='video' && it.url){
+      mini=`<video src="${escapeHtml(it.url)}" muted playsinline preload="metadata" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;pointer-events:none;"></video>`;
+    } else {
+      mini=`<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
+    }
     row.innerHTML=`<i class="fa-solid fa-grip-vertical" style="color:var(--text-dim);font-size:11px;"></i>
       <span style="color:var(--text-dim);font-size:11px;min-width:18px;">${idx+1}</span>
       ${mini}
@@ -2169,6 +2187,7 @@ function sairDaPregacao(){
   // é sair da pregação — só mudar de slide
   if(noAr && noAr.type==='song' && noAr.songId===AppState.currentSongId) return;
   AppState.sermonImage=null;
+  AppState.sermonVideo=null;
   AppState.liveSermonItemId=null;
 }
 
@@ -2178,8 +2197,12 @@ function projetarItemPregacao(sermon, idx, jaTentouCarregar){
   AppState.currentSermonId=sermon.id;
   AppState.liveSermonItemId=it.id;
   AppState.sermonImage=null;
+  AppState.sermonVideo=null;
   AppState.previewOverride=null;
-  if(it.type==='image'){
+  if(it.type==='video'){
+    AppState.sermonVideo=it.url||null;
+    AppState.currentSongId=null; AppState.currentSlideIndex=0;
+  } else if(it.type==='image'){
     const url=AppState.sermonSlides[it.slideId];
     if(!url){
       if(jaTentouCarregar){ toast('Esta imagem não está mais na nuvem.'); return; }
@@ -2220,12 +2243,13 @@ function itemDaPregacaoNoAr(){
 function currentSermon(){ return AppState.sermons.find(s=>s.id===AppState.currentSermonId) || null; }
 function rotuloItemPregacao(it){
   if(it.type==='image') return it.name || 'Imagem';
+  if(it.type==='video') return it.name || 'Vídeo';
   if(it.type==='text')  return (it.text||'').split('\n')[0].slice(0,60) || '(texto vazio)';
   if(it.type==='song'){ const s=AppState.songs.find(x=>x.id===it.songId); return s? s.title : (it.title||'(música removida)'); }
   if(it.type==='bible') return it.ref || 'Versículo';
   return it.type;
 }
-const ICONE_ITEM={image:'fa-image', text:'fa-align-left', song:'fa-music', bible:'fa-book-bible'};
+const ICONE_ITEM={image:'fa-image', video:'fa-film', text:'fa-align-left', song:'fa-music', bible:'fa-book-bible'};
 
 /* =========================================================
    PREVIEW / PROJECTION / STAGE
@@ -2417,7 +2441,9 @@ function updatePreview(){
   applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout);
 
   const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
-  const videoNaTela = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null) : null;
+  // aviso lateral tem prioridade sobre o item da pregação
+  const videoNaTela = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
+    : (!activeMedia && !AppState.blackout ? AppState.sermonVideo : null);
   const imagemNaTela = videoNaTela ? null
     : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
   [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
