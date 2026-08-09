@@ -212,6 +212,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 #playlist-items,#sermon-items{display:flex;flex-direction:column;gap:6px;}
 .pl-item.no-ar{border:1px solid var(--accent);box-shadow:0 0 12px rgba(255,60,90,.25);}
 .pl-item .badge-noar{display:none;}
+.transport button.ligado,button.ligado{background:var(--accent)!important;color:#fff!important;}
 .pl-item.no-ar .badge-noar{display:inline-block;}
 .badge-noar{background:var(--accent);color:#fff;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:99px;flex:none;}
 .pl-item{
@@ -2357,6 +2358,10 @@ function projetarItemPregacao(sermon, idx, jaTentouCarregar){
   if(!it) return;
   AppState.currentSermonId=sermon.id;
   AppState.liveSermonItemId=it.id;
+  // "projetar" significa aparecer agora: tela apagada e aviso em tela cheia
+  // são justamente o que impediria isso, e ficavam ligados sem aviso nenhum
+  AppState.blackout=false;
+  AppState.activeMediaId=null;
   AppState.sermonImage=null;
   AppState.sermonVideo=null;
   AppState.previewOverride=null;
@@ -2612,11 +2617,14 @@ function updatePreview(){
   const videoBruto = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
     : (!activeMedia && !AppState.blackout ? AppState.sermonVideo : null);   // aviso tem prioridade sobre a pregação
   const videoNaTela = resolverUrlVideo(videoBruto);
+  // Vídeo cujo arquivo está em outro aparelho não resolve aqui. Em vez de
+  // deixar o telão preto sem explicação, mostra a miniatura dele.
+  const posterDeReserva = (!videoNaTela && videoBruto && activeMedia && activeMedia.poster) ? activeMedia.poster : null;
   const imagemNaTela = videoNaTela ? null
-    : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
+    : (posterDeReserva || (activeMedia ? (activeMedia.dataUrl||null) : (AppState.blackout ? null : AppState.sermonImage)));
   const coberturaTotal = !!(videoNaTela || imagemNaTela);
   const previewEl=document.getElementById('preview-text-el');
-  setSlideText(previewEl, text || (AppState.textHidden && !AppState.blackout ? '' : 'Selecione um slide'), theme);
+  setSlideText(previewEl, text || (AppState.blackout ? 'TELA APAGADA' : (AppState.textHidden ? '' : 'Selecione um slide')), theme);
   const previewBoxWidth = document.getElementById('live-preview').clientWidth || 320;
   const previewScale = previewBoxWidth / 1280; // 1280px = referência da resolução de projeção
   applyThemeToEl(previewEl,null,theme,previewScale);
@@ -2659,6 +2667,10 @@ function updatePreview(){
     el.classList.toggle('no-ar', !!AppState.liveSermonItemId && el.dataset.itemId===AppState.liveSermonItemId);
   });
   renderSlideStrip();
+  const btBlack=document.getElementById('tr-blackout');
+  if(btBlack) btBlack.classList.toggle('ligado', !!AppState.blackout);
+  const btHide=document.getElementById('tr-hidetext');
+  if(btHide) btHide.classList.toggle('ligado', !!AppState.textHidden);
 
   pushLiveState();
 }
