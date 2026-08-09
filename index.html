@@ -1773,6 +1773,11 @@ document.addEventListener('keydown',(e)=>{
    SEED — músicas solicitadas (sem letra, para colar depois)
    ========================================================= */
 function seedDefaultSongs(){
+  // Só semeia num banco realmente vazio. Sem esta guarda, um aparelho novo
+  // (localStorage vazio) semeava antes do initCloudSync trazer as músicas da
+  // nuvem, não encontrava os títulos e recriava tudo com IDs novos — foi assim
+  // que nasceram as duplicatas de 'Clamo Jesus', 'Cristo' etc.
+  if(AppState.songs.length > 0) return;
   const wanted = [
     {title:'Clamo Jesus', artist:'', slideLabels:['Slide 1']},
     {title:'Digno de tudo (Worthy of it all)', artist:'', slideLabels:['Slide 1']},
@@ -1810,7 +1815,9 @@ loadState();          // cache local, pra abrir instantâneo mesmo offline
 if(isTvMode){
   initTvMode();       // PC do telão: só escuta e projeta
 } else {
-  seedDefaultSongs();
+  // seedDefaultSongs() NÃO roda aqui: neste ponto o AppState só tem o cache
+  // local, então num aparelho novo ele duplicaria tudo. Quem chama é o
+  // initCloudSync(), depois de carregar as músicas da nuvem.
   renderView();
   renderMediaPanel();
   updatePreview();
