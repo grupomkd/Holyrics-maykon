@@ -733,6 +733,7 @@ async function initCloudSync(){
     else updatePreview();
     podePublicarLive = true;
     updateSyncStatus('synced');
+    garantirPostersDeVideo();   // vídeos antigos ganham miniatura sem precisar recolocar
   }catch(err){
     console.warn('Sem conexão com o Firestore, usando cache local.', err);
     updateSyncStatus('offline');
@@ -1799,12 +1800,21 @@ function renderMediaPanel(){
     // no vídeo a miniatura é só o primeiro quadro (preload=metadata): deixar
     // vários tocando aqui no painel não serve pra nada e come processador
     const urlVideo = ehVideo ? resolverUrlVideo(m.url) : null;
+    let visual;
+    if(!ehVideo){
+      visual=`<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`;
+    } else if(urlVideo){
+      visual=`<video src="${urlVideo}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;pointer-events:none;"></video>`;
+    } else if(m.poster){
+      // o arquivo não está neste aparelho, mas a miniatura veio da nuvem
+      visual=`<img src="${m.poster}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;opacity:.85;">`;
+    } else {
+      visual=`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#12172b;color:var(--text-dim);font-size:16px;"><i class="fa-solid fa-film"></i></div>`;
+    }
     const midia = ehVideo
-      ? (urlVideo
-          ? `<video src="${urlVideo}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;pointer-events:none;"></video>`
-          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#12172b;color:var(--text-dim);font-size:16px;"><i class="fa-solid fa-film"></i></div>`)
-        + `<span style="position:absolute;bottom:2px;left:3px;font-size:9px;color:#fff;text-shadow:0 1px 3px #000;"><i class="fa-solid fa-film"></i></span>`
-      : `<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`;
+      ? visual + `<span style="position:absolute;top:2px;left:3px;font-size:9px;color:#fff;text-shadow:0 1px 3px #000;"><i class="fa-solid fa-film"></i></span>`
+        + `<span style="position:absolute;left:0;right:0;bottom:0;padding:3px 4px;font-size:8px;line-height:1.2;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.85));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.name||'Vídeo')}</span>`
+      : visual;
     thumb.innerHTML=`${midia}
       <button style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:4px;width:16px;height:16px;font-size:9px;color:#fff;" title="Remover">✕</button>`;
     thumb.addEventListener('click',()=>{
@@ -1832,7 +1842,9 @@ document.getElementById('media-video-input').addEventListener('change',async (e)
   toast('Salvando o vídeo neste computador…');
   try{
     await saveLocalVideo(chave, file);
-    const item={id, type:'video', name:file.name, url:'local:'+chave};
+    let poster=null;
+    try{ poster=await gerarPosterDeVideo(file); }catch(err){ console.warn('Sem miniatura:', err); }
+    const item={id, type:'video', name:file.name, url:'local:'+chave, poster};
     AppState.media.push(item);
     saveMediaCloud(item); saveState(); renderMediaPanel();
     toast('Vídeo pronto. Ele fica só neste computador.');
@@ -2030,6 +2042,64 @@ function comprimirImagem(fonte){
     img.src=fonte;
   });
 }
+// O arquivo do vídeo fica só no aparelho que o escolheu, mas uma miniatura
+// cabe tranquilo no Firestore — então os outros aparelhos pelo menos veem o
+// que é, em vez de um quadrado vazio.
+const POSTER_LARGURA = 480;
+function gerarPosterDeVideo(blob){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(blob);
+    const v=document.createElement('video');
+    let terminou=false;
+    const encerrar=(fn,arg)=>{ if(terminou) return; terminou=true; URL.revokeObjectURL(url); fn(arg); };
+    const falhou=()=>encerrar(reject,new Error('não consegui ler o vídeo'));
+    const capturar=()=>{
+      try{
+        const c=document.createElement('canvas');
+        const larg=v.videoWidth||640, alt=v.videoHeight||360;
+        const escala=Math.min(1, POSTER_LARGURA/larg);
+        c.width=Math.max(1,Math.round(larg*escala));
+        c.height=Math.max(1,Math.round(alt*escala));
+        c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+        encerrar(resolve, c.toDataURL('image/jpeg',0.65));
+      }catch(e){ falhou(); }
+    };
+    v.muted=true; v.playsInline=true; v.preload='auto';
+    v.onerror=falhou;
+    v.onseeked=capturar;
+    v.onloadeddata=()=>{
+      // um pouco depois do início: o primeiro quadro costuma ser preto
+      const alvo=Math.min(1, (isFinite(v.duration)?v.duration:1)*0.1);
+      try{ v.currentTime=alvo; }catch(e){ capturar(); }
+    };
+    v.src=url;
+    setTimeout(falhou, 10000);   // vídeo que não abre não pode travar o fluxo
+  });
+}
+
+// Itens de vídeo criados antes da miniatura existir: se o arquivo está neste
+// aparelho, gera agora e sobe, pra não ter que recolocar tudo na mão.
+async function garantirPostersDeVideo(){
+  for(const m of AppState.media){
+    if(m.type!=='video' || m.poster || !String(m.url||'').startsWith('local:')) continue;
+    const blob=await getLocalVideo(String(m.url).slice(6)).catch(()=>null);
+    if(!blob) continue;
+    try{ m.poster=await gerarPosterDeVideo(blob); saveMediaCloud(m); }catch(e){}
+  }
+  for(const s of AppState.sermons){
+    let mudou=false;
+    for(const it of (s.items||[])){
+      if(it.type!=='video' || it.poster || !String(it.url||'').startsWith('local:')) continue;
+      const blob=await getLocalVideo(String(it.url).slice(6)).catch(()=>null);
+      if(!blob) continue;
+      try{ it.poster=await gerarPosterDeVideo(blob); mudou=true; }catch(e){}
+    }
+    if(mudou) saveSermonCloud(s);
+  }
+  renderMediaPanel();
+  if(AppState.view==='sermon') renderView();
+}
+
 function lerArquivoComoDataUrl(file){
   return new Promise((resolve,reject)=>{
     const r=new FileReader();
@@ -2153,8 +2223,11 @@ function renderSermonCenter(container){
     progresso.textContent='Salvando o vídeo neste computador…';
     try{
       await saveLocalVideo(chave, file);
+      progresso.textContent='Gerando a miniatura…';
+      let poster=null;
+      try{ poster=await gerarPosterDeVideo(file); }catch(err){ console.warn('Sem miniatura:', err); }
       progresso.classList.add('hidden');
-      acrescentar([{id:itemId, type:'video', url:'local:'+chave, name:file.name}]);
+      acrescentar([{id:itemId, type:'video', url:'local:'+chave, name:file.name, poster}]);
       toast('Vídeo pronto. Ele fica só neste computador.');
     }catch(err){
       console.error(err); progresso.classList.add('hidden');
@@ -2233,6 +2306,8 @@ function renderSermonCenter(container){
       mini=`<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`;
     } else if(it.type==='video' && resolverUrlVideo(it.url)){
       mini=`<video src="${resolverUrlVideo(it.url)}" muted playsinline preload="metadata" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;pointer-events:none;"></video>`;
+    } else if(it.type==='video' && it.poster){
+      mini=`<img src="${it.poster}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;opacity:.85;">`;
     } else {
       mini=`<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
     }
