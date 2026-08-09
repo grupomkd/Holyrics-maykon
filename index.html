@@ -2324,6 +2324,20 @@ function tickLoopVideo(L){
   const v=L.ativo, r=L.reserva;
   if(!L.src || L.fade<=0) return;
   if(!v.duration || !isFinite(v.duration)) return;
+  if(L.modo==='preto'){
+    // Vídeo com conteúdo (logo, avisos): some para o preto e volta do preto.
+    // Sobrepor o fim com o começo mostraria dois trechos do mesmo vídeo ao
+    // mesmo tempo, o que num vídeo com texto parece defeito. Aqui quem faz o
+    // loop é o próprio player; a gente só controla a opacidade nas pontas.
+    const meio=Math.min(L.fade, (v.duration/(v.playbackRate||1))*0.4)/2;
+    const restante=(v.duration - v.currentTime)/(v.playbackRate||1);
+    const decorrido=v.currentTime/(v.playbackRate||1);
+    let op=1;
+    if(restante<meio) op=Math.max(0, restante/meio);
+    else if(decorrido<meio) op=Math.min(1, decorrido/meio);
+    v.style.opacity=String(op);
+    return;
+  }
   // A mesclagem não pode comer o clipe: num vídeo de 8s acelerado em 2x sobram
   // 4s reais, e uma mesclagem de 3s deixaria o fundo quase sempre em transição,
   // trocando de elemento sem parar. 40% da duração real é o teto.
@@ -2360,6 +2374,7 @@ function aplicarLoopVideo(elA, src, opcoes){
     return;
   }
   const speed=velocidadeDoTema(opcoes), fade=mesclagemDoTema(opcoes);
+  const modo=(opcoes && opcoes.modo)==='preto' ? 'preto' : 'mesclar';
 
   let L=loopsDeVideo[elA.id];
   if(!L){
@@ -2367,10 +2382,10 @@ function aplicarLoopVideo(elA, src, opcoes){
     const passo=()=>{ try{ tickLoopVideo(L); }catch(e){} requestAnimationFrame(passo); };
     requestAnimationFrame(passo);
   }
-  L.fade=fade;
+  L.fade=fade; L.modo=modo;
 
   if(!src){
-    [elA,elB].forEach(v=>{ v.pause(); v.style.display='none'; });
+    [elA,elB].forEach(v=>{ v.pause(); v.style.display='none'; v.style.opacity='1'; });
     L.src=null; L.trocando=false; L.ativo=elA; L.reserva=elB;
     return;
   }
@@ -2384,12 +2399,13 @@ function aplicarLoopVideo(elA, src, opcoes){
     elB.pause();
   }
   [elA,elB].forEach(v=>{ v.playbackRate=speed; });
-  L.ativo.loop=(fade<=0);
+  const usaPar = fade>0 && modo==='mesclar';
+  L.ativo.loop=!usaPar;                       // sem o par, quem repete é o próprio player
   L.reserva.loop=false;
   L.ativo.style.display='block';
-  if(fade<=0 && !L.trocando){
+  if(!usaPar && !L.trocando){
     L.reserva.pause(); L.reserva.style.display='none';
-    L.ativo.style.opacity='1';
+    if(fade<=0) L.ativo.style.opacity='1';    // no modo preto quem manda na opacidade é o tick
   }
   if(L.ativo.paused) L.ativo.play().catch(()=>{});
 }
@@ -2501,7 +2517,7 @@ function updatePreview(){
   // já ligada por padrão (não tem controle na tela pra isso)
   ['preview-media-video','projection-media-video'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el) aplicarLoopVideo(el, videoNaTela, {speed:1, crossfade:MESCLAGEM_MIDIA});
+    if(el) aplicarLoopVideo(el, videoNaTela, {speed:1, crossfade:MESCLAGEM_MIDIA, modo:'preto'});
   });
 
   // stage view
