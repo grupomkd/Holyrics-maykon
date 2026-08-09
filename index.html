@@ -390,6 +390,8 @@ body.display-mode #display-live-dot{display:flex;}
         <div id="preview-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
         <div class="preview-text" id="preview-text-el">Selecione um slide</div>
         <img id="preview-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
+        <video id="preview-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
+        <video id="preview-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
       </div>
       <div class="transport">
         <button id="tr-prev" title="Slide anterior (←)"><i class="fa-solid fa-backward-step"></i></button>
@@ -405,7 +407,8 @@ body.display-mode #display-live-dot{display:flex;}
       </div>
       <div style="margin-top:14px;">
         <div class="panel-header" style="padding:0 0 8px 0;border:none;">Mídia (dízimo/avisos)</div>
-        <button class="btn ghost sm" id="media-upload-btn" style="width:100%;margin-bottom:8px;"><i class="fa-solid fa-plus"></i> Adicionar imagem</button>
+        <button class="btn ghost sm" id="media-upload-btn" style="width:100%;margin-bottom:6px;"><i class="fa-solid fa-plus"></i> Adicionar imagem</button>
+        <button class="btn ghost sm" id="media-video-btn" style="width:100%;margin-bottom:8px;"><i class="fa-solid fa-film"></i> Adicionar vídeo (link)</button>
         <input type="file" id="media-file-input" accept="image/*" class="hidden" multiple>
         <div id="media-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;"></div>
       </div>
@@ -432,6 +435,8 @@ body.display-mode #display-live-dot{display:flex;}
   <div id="projection-bg-dim" style="position:absolute;inset:0;background:#000;z-index:1;"></div>
   <div id="projection-text">Aguardando...</div>
   <img id="projection-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
+  <video id="projection-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
+  <video id="projection-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
   <div id="projection-exit-hint">ESC para sair • F tela cheia • ← → slides</div>
 </div>
 
@@ -1716,11 +1721,18 @@ function renderMediaPanel(){
   if(!grid) return;
   grid.innerHTML='';
   AppState.media.forEach(m=>{
+    const ehVideo = m.type==='video';
     const thumb=document.createElement('div');
     thumb.style.cssText='position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid '+(AppState.activeMediaId===m.id?'var(--accent)':'transparent');
-    thumb.innerHTML=`<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;">
+    // no vídeo a miniatura é só o primeiro quadro (preload=metadata): deixar
+    // vários tocando aqui no painel não serve pra nada e come processador
+    const midia = ehVideo
+      ? `<video src="${escapeHtml(m.url||'')}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;pointer-events:none;"></video>
+         <span style="position:absolute;bottom:2px;left:3px;font-size:9px;color:#fff;text-shadow:0 1px 3px #000;"><i class="fa-solid fa-film"></i></span>`
+      : `<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`;
+    thumb.innerHTML=`${midia}
       <button style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:4px;width:16px;height:16px;font-size:9px;color:#fff;" title="Remover">✕</button>`;
-    thumb.querySelector('img').addEventListener('click',()=>{
+    thumb.addEventListener('click',()=>{
       AppState.activeMediaId = AppState.activeMediaId===m.id ? null : m.id;
       saveState(); renderMediaPanel(); updatePreview();
     });
@@ -1735,6 +1747,18 @@ function renderMediaPanel(){
   });
 }
 document.getElementById('media-upload-btn').addEventListener('click',()=>document.getElementById('media-file-input').click());
+// vídeo entra por link, não por upload: um arquivo de vídeo não cabe no
+// documento do Firestore (limite de 1MB), então ele fica hospedado e aqui vai só o endereço
+document.getElementById('media-video-btn').addEventListener('click',()=>{
+  const url=(prompt('Cole o link do vídeo.\n\nEle roda em loop, com a mesclagem entre os loops já ligada.','')||'').trim();
+  if(!url) return;
+  if(!/^(https?:\/\/|\.?\/|videos\/)/i.test(url)){ toast('Cole o endereço completo, começando com https://'); return; }
+  const nome=((prompt('Nome pra identificar na lista:','Vídeo')||'').trim())||'Vídeo';
+  const item={id:uid(), type:'video', name:nome, url};
+  AppState.media.push(item);
+  saveState(); saveMediaCloud(item); renderMediaPanel();
+  toast('Vídeo adicionado — clique nele pra jogar na tela');
+});
 document.getElementById('media-file-input').addEventListener('change',(e)=>{
   [...e.target.files].forEach(file=>{
     const reader=new FileReader();
@@ -2231,8 +2255,10 @@ function nextSlideText(){
    ========================================================= */
 const loopsDeVideo = {};
 
-function velocidadeDoTema(bg){ return Math.min(2, Math.max(0.1, Number(bg && bg.speed) || 1)); }
-function mesclagemDoTema(bg){ return Math.min(5, Math.max(0, Number(bg && bg.crossfade) || 0)); }
+function velocidadeDoTema(o){ return Math.min(2, Math.max(0.1, Number(o && o.speed) || 1)); }
+function mesclagemDoTema(o){ return Math.min(5, Math.max(0, Number(o && o.crossfade) || 0)); }
+// mesclagem usada nos vídeos de aviso, que não têm controle próprio na tela
+const MESCLAGEM_MIDIA = 0.8;
 
 function tickLoopVideo(L){
   const v=L.ativo, r=L.reserva;
@@ -2266,15 +2292,14 @@ function tickLoopVideo(L){
   }
 }
 
-function aplicarLoopVideo(elA, src, theme){
+function aplicarLoopVideo(elA, src, opcoes){
   const elB=document.getElementById(elA.id+'-b');
   if(!elB){                                   // sem o elemento reserva, cai no loop simples
     if(src){ if(elA.getAttribute('src')!==src) elA.src=src; elA.loop=true; elA.style.display='block'; if(elA.paused) elA.play().catch(()=>{}); }
     else { elA.pause(); elA.style.display='none'; }
     return;
   }
-  const bg=(theme && theme.background) || {};
-  const speed=velocidadeDoTema(bg), fade=mesclagemDoTema(bg);
+  const speed=velocidadeDoTema(opcoes), fade=mesclagemDoTema(opcoes);
 
   let L=loopsDeVideo[elA.id];
   if(!L){
@@ -2310,7 +2335,7 @@ function aplicarLoopVideo(elA, src, theme){
 }
 
 function applyBackground(bgEl, videoEl, dimEl, theme, blackout){
-  if(videoEl) aplicarLoopVideo(videoEl, !blackout ? resolveVideoSrc(theme) : null, theme);
+  if(videoEl) aplicarLoopVideo(videoEl, !blackout ? resolveVideoSrc(theme) : null, (theme && theme.background) || {});
   if(dimEl) dimEl.style.opacity = blackout ? 1 : (theme.background.opacity/100);
   if(!bgEl) return;
   bgEl.classList.remove('bg-anim-1','bg-anim-2');
@@ -2392,11 +2417,19 @@ function updatePreview(){
   applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout);
 
   const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
-  const imagemNaTela = activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage);
+  const videoNaTela = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null) : null;
+  const imagemNaTela = videoNaTela ? null
+    : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
   [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
     const img=document.getElementById(id);
     if(imagemNaTela){ if(img.getAttribute('src')!==imagemNaTela) img.src=imagemNaTela; img.style.display='block'; }
     else { img.style.display='none'; }
+  });
+  // vídeo de aviso: mesma regra de clique da imagem, com a mesclagem de loop
+  // já ligada por padrão (não tem controle na tela pra isso)
+  ['preview-media-video','projection-media-video'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) aplicarLoopVideo(el, videoNaTela, {speed:1, crossfade:MESCLAGEM_MIDIA});
   });
 
   // stage view
