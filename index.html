@@ -209,7 +209,9 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 .theme-swatch{width:36px;height:24px;border-radius:4px;flex-shrink:0;}
 
 /* Playlist */
-#playlist-items{display:flex;flex-direction:column;gap:6px;}
+#playlist-items,#sermon-items{display:flex;flex-direction:column;gap:6px;}
+.pl-item.no-ar{border:1px solid var(--accent);box-shadow:0 0 12px rgba(255,60,90,.25);}
+.badge-noar{background:var(--accent);color:#fff;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:99px;flex:none;}
 .pl-item{
   display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
   background:var(--surface-2);border:1px solid var(--border);cursor:grab;
@@ -352,6 +354,7 @@ body.display-mode #display-live-dot{display:flex;}
   <button class="tab-btn active" data-view="bible"><i class="fa-solid fa-book-bible"></i> Bíblia</button>
   <button class="tab-btn" data-view="songs"><i class="fa-solid fa-music"></i> Músicas</button>
   <button class="tab-btn" data-view="themes"><i class="fa-solid fa-palette"></i> Temas</button>
+  <button class="tab-btn" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i> Pregação</button>
   <button class="tab-btn" data-view="playlist"><i class="fa-solid fa-list-check"></i> Playlist</button>
   <div id="topbar-spacer"></div>
   <span id="sync-status" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding:0 10px;">
@@ -415,6 +418,7 @@ body.display-mode #display-live-dot{display:flex;}
 <div id="bottom-tabs">
   <button class="bt-item active" data-view="bible"><i class="fa-solid fa-book-bible"></i><span>Bíblia</span></button>
   <button class="bt-item" data-view="songs"><i class="fa-solid fa-music"></i><span>Músicas</span></button>
+  <button class="bt-item" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i><span>Pregação</span></button>
   <button class="bt-item" data-view="playlist"><i class="fa-solid fa-list-check"></i><span>Playlist</span></button>
   <button class="bt-item" data-pane="right"><i class="fa-solid fa-tv"></i><span>Ao Vivo</span></button>
   <button class="bt-item" data-view="themes"><i class="fa-solid fa-palette"></i><span>Temas</span></button>
@@ -453,7 +457,7 @@ body.display-mode #display-live-dot{display:flex;}
    FIREBASE (Firestore) — sincronização em nuvem
    ========================================================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDut6pM1ajgL8n-zjQCgEdqzLsj2IKgKtI",
@@ -518,6 +522,8 @@ const mediaDocRef = doc(db,'holyrics_data','media');
 const mediaCollRef = collection(db,'holyrics_media');
 const metaDocRef = doc(db,'holyrics_data','meta');
 const liveDocRef = doc(db,'holyrics_data','live');
+const sermonsCollRef = collection(db,'holyrics_sermons');
+const sermonSlidesCollRef = collection(db,'holyrics_sermon_slides');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -611,6 +617,8 @@ function pushLiveState(){
       themeId: AppState.activeThemeId || null,
       overrideText: AppState.previewOverride ? AppState.previewOverride.text : null,
       activeMediaId: AppState.activeMediaId || null,
+      sermonImage: AppState.sermonImage || null,
+      sermonItemId: AppState.liveSermonItemId || null,
       updatedAt: Date.now(),
     }).catch(err=>console.error('Erro ao enviar estado ao vivo:', err));
   }, 120);
@@ -640,6 +648,8 @@ async function initTvMode(){
     AppState.activeThemeId = d.themeId || AppState.activeThemeId;
     AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
     AppState.activeMediaId = d.activeMediaId || null;
+    AppState.sermonImage = d.sermonImage || null;
+    AppState.liveSermonItemId = d.sermonItemId || null;
     applyLiveToPreview();
   });
 
@@ -657,13 +667,14 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef)]);
     if(!songsSnap.empty) AppState.songs = songsSnap.docs.map(d=>d.data());
     if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
     if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
     if(!AppState.themes.find(t=>t.id===AppState.activeThemeId) && AppState.themes[0]) AppState.activeThemeId = AppState.themes[0].id;
     if(plSnap.exists() && Array.isArray(plSnap.data().list)) AppState.playlists = plSnap.data().list;
     if(!mediaSnap.empty) AppState.media = mediaSnap.docs.map(d=>d.data());
+    AppState.sermons = sermonsSnap.docs.map(d=>d.data());
     seedDefaultSongs();
     renderView(); renderMediaPanel(); updatePreview();
     updateSyncStatus('synced');
@@ -697,6 +708,13 @@ async function initCloudSync(){
     AppState.media = snap.docs.map(d=>d.data());
     renderMediaPanel();
   });
+  // só os metadados da pregação: as imagens ficam em holyrics_sermon_slides e
+  // são baixadas quando alguém abre aquela pregação
+  onSnapshot(sermonsCollRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    AppState.sermons = snap.docs.map(d=>d.data());
+    if(AppState.view==='sermon') renderView();
+  });
 }
 
 /* =========================================================
@@ -716,6 +734,11 @@ const AppState = {
   textHidden: false,
   media: [],
   activeMediaId: null,
+  sermons: [],
+  currentSermonId: null,
+  sermonSlides: {},      // slideId -> dataUrl, carregado sob demanda
+  liveSermonItemId: null, // qual item da pregação está na tela
+  sermonImage: null,      // dataUrl da imagem no ar, se houver
   mobileActiveTab: 'bible',
 };
 
@@ -724,6 +747,7 @@ function saveState(){
   localStorage.setItem('holyrics_songs', JSON.stringify(AppState.songs));
   localStorage.setItem('holyrics_themes', JSON.stringify(AppState.themes));
   localStorage.setItem('holyrics_playlists', JSON.stringify(AppState.playlists));
+  try{ localStorage.setItem('holyrics_sermons', JSON.stringify(AppState.sermons)); }catch(e){}
   localStorage.setItem('holyrics_active_theme', AppState.activeThemeId || '');
   try{ localStorage.setItem('holyrics_media', JSON.stringify(AppState.media)); }catch(e){}
   // sincroniza com o Firestore (debounced)
@@ -733,6 +757,7 @@ function loadState(){
   AppState.songs = JSON.parse(localStorage.getItem('holyrics_songs') || '[]');
   AppState.themes = JSON.parse(localStorage.getItem('holyrics_themes') || '[]');
   AppState.playlists = JSON.parse(localStorage.getItem('holyrics_playlists') || '[]');
+  AppState.sermons = JSON.parse(localStorage.getItem('holyrics_sermons') || '[]');
   AppState.activeThemeId = localStorage.getItem('holyrics_active_theme') || null;
   AppState.media = JSON.parse(localStorage.getItem('holyrics_media') || '[]');
   if(AppState.themes.length===0){
@@ -879,7 +904,7 @@ function setMobilePane(pane){
   const backBtn=document.getElementById('mobile-back-btn');
   const titleEl=document.getElementById('mobile-title');
   if(backBtn) backBtn.classList.toggle('show', pane==='center');
-  const titles={bible:'Bíblia',songs:'Músicas',themes:'Temas',playlist:'Playlist'};
+  const titles={bible:'Bíblia',songs:'Músicas',themes:'Temas',playlist:'Playlist',sermon:'Pregação'};
   if(titleEl) titleEl.textContent = pane==='right' ? 'Ao Vivo' : (titles[AppState.view]||'');
   document.querySelectorAll('.bt-item').forEach(b=>{
     const isActive = pane==='right' ? b.dataset.pane==='right' : (b.dataset.view===AppState.view && AppState.mobileActiveTab!=='right');
@@ -893,6 +918,7 @@ function updateMobilePaneAuto(){
   if(AppState.view==='bible') hasDetail=!!AppState.bible.book;
   else if(AppState.view==='songs') hasDetail=!!AppState.currentSongId;
   else if(AppState.view==='playlist') hasDetail=!!AppState.currentPlaylistId;
+  else if(AppState.view==='sermon') hasDetail=!!AppState.currentSermonId;
   else if(AppState.view==='themes') hasDetail=!!AppState.editingThemeId;
   setMobilePane(hasDetail?'center':'left');
 }
@@ -900,6 +926,7 @@ function clearCurrentDetail(){
   if(AppState.view==='bible'){ AppState.bible.book=null; }
   else if(AppState.view==='songs'){ AppState.currentSongId=null; }
   else if(AppState.view==='playlist'){ AppState.currentPlaylistId=null; }
+  else if(AppState.view==='sermon'){ AppState.currentSermonId=null; }
   else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
 }
 document.querySelectorAll('.bt-item').forEach(btn=>{
@@ -957,6 +984,11 @@ function renderView(){
     centerHeader.textContent='Editor de tema';
     renderThemesLeft(leftBody);
     renderThemesCenter(centerBody);
+  } else if(AppState.view==='sermon'){
+    leftHeader.textContent='Pregações';
+    centerHeader.textContent='Sequência da pregação';
+    renderSermonLeft(leftBody);
+    renderSermonCenter(centerBody);
   } else if(AppState.view==='playlist'){
     leftHeader.textContent='Playlists';
     centerHeader.textContent='Itens da playlist';
@@ -1333,7 +1365,7 @@ function renderSongsLeft(container){
   container.appendChild(wrap);
   wrap.querySelector('#new-song-btn').addEventListener('click',()=>{
     const s={id:uid(),title:'Nova música',artist:'',notes:'',lyrics:'',slides:[],themeId:null,history:[],createdAt:Date.now()};
-    AppState.songs.unshift(s); AppState.currentSongId=s.id; AppState.previewOverride=null; saveState(); saveSongCloud(s); renderView(); updatePreview();
+    AppState.songs.unshift(s); AppState.currentSongId=s.id; AppState.previewOverride=null; sairDaPregacao(); saveState(); saveSongCloud(s); renderView(); updatePreview();
   });
   wrap.querySelector('#song-search').addEventListener('input',e=>renderSongList(wrap.querySelector('#song-list'),e.target.value));
   renderSongList(wrap.querySelector('#song-list'),'');
@@ -1347,7 +1379,7 @@ function renderSongList(el,filter){
     const item=document.createElement('div');
     item.className='song-item'+(AppState.currentSongId===s.id?' selected':'');
     item.innerHTML=`<div class="t">${s.title||'(sem título)'}</div><div class="a">${s.artist||'—'} · ${s.slides.length} slides</div>`;
-    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; renderView(); updatePreview();});
+    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; sairDaPregacao(); renderView(); updatePreview();});
     el.appendChild(item);
   });
 }
@@ -1444,7 +1476,7 @@ function renderSongsCenter(container){
     }, 400);
     textarea.addEventListener('input', ()=>{ autoResize(); debouncedSave(); });
     textarea.addEventListener('focus', ()=>{
-      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; sairDaPregacao(); updatePreview();
     });
     textarea.addEventListener('blur', ()=>{
       slide.text = textarea.value; saveState(); saveSongCloud(song); updatePreview();
@@ -1452,7 +1484,7 @@ function renderSongsCenter(container){
     card.addEventListener('click',(e)=>{
       if(e.target.closest('.slide-actions')) return;
       if(e.target.closest('.slide-content')) return; // deixa o clique focar o textarea sem re-renderizar
-      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; sairDaPregacao(); updatePreview();
     });
     card.querySelector('.split-btn').addEventListener('click',(e)=>{
       e.stopPropagation();
@@ -1800,7 +1832,7 @@ function renderPlaylistCenter(container){
       <button class="pl-play-btn btn sm ghost"><i class="fa-solid fa-play"></i></button>
       <button class="pl-del-btn"><i class="fa-solid fa-xmark"></i></button>`;
     row.querySelector('.pl-play-btn').addEventListener('click',()=>{
-      if(it.type==='song'){ AppState.currentSongId=it.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; updatePreview(); switchView('songs'); }
+      if(it.type==='song'){ AppState.currentSongId=it.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; sairDaPregacao(); updatePreview(); switchView('songs'); }
     });
     row.querySelector('.pl-del-btn').addEventListener('click',()=>{
       pl.items.splice(idx,1); saveState(); renderView();
@@ -1821,6 +1853,355 @@ function renderPlaylistCenter(container){
     itemsEl.appendChild(row);
   });
 }
+
+/* =========================================================
+   PREGAÇÃO — sequência de imagens, textos, músicas e versículos
+   As imagens não cabem no documento da pregação (o Firestore corta
+   em 1MB), então cada uma vira um documento próprio em
+   holyrics_sermon_slides e a pregação guarda só o id. Toda imagem
+   passa por uma redução em canvas antes de subir, e as imagens de
+   uma pregação só são baixadas quando ela é aberta.
+   ========================================================= */
+const SERMAO_LARGURA_MAX = 1600;
+const SERMAO_BYTES_MAX   = 700*1024;   // folga confortável dentro do limite de 1MB do documento
+
+function saveSermonCloud(s){
+  updateSyncStatus('saving');
+  setDoc(doc(sermonsCollRef, s.id), sanitizeForFirestore(s))
+    .then(()=>updateSyncStatus('synced'))
+    .catch(err=>{ console.error('Erro salvando pregação:', err); updateSyncStatus('error'); toast('Não consegui salvar a pregação na nuvem.'); });
+}
+function deleteSermonCloud(id){ deleteDoc(doc(sermonsCollRef,id)).catch(()=>{}); }
+function saveSermonSlideCloud(slide){ return setDoc(doc(sermonSlidesCollRef, slide.id), sanitizeForFirestore(slide)); }
+function deleteSermonSlideCloud(id){ deleteDoc(doc(sermonSlidesCollRef,id)).catch(()=>{}); }
+
+async function carregarSlidesDaPregacao(sermonId){
+  try{
+    const snap=await getDocs(query(sermonSlidesCollRef, where('sermonId','==',sermonId)));
+    snap.docs.forEach(d=>{ const s=d.data(); if(s && s.id) AppState.sermonSlides[s.id]=s.dataUrl; });
+    return true;
+  }catch(err){
+    console.error('Erro carregando imagens da pregação:', err);
+    toast('Não consegui carregar as imagens desta pregação.');
+    return false;
+  }
+}
+
+function reduzirCanvas(c, fator){
+  const n=document.createElement('canvas');
+  n.width=Math.max(1,Math.round(c.width*fator));
+  n.height=Math.max(1,Math.round(c.height*fator));
+  const ctx=n.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,n.width,n.height);
+  ctx.drawImage(c,0,0,n.width,n.height);
+  return n;
+}
+// Baixa a qualidade até o base64 caber no documento; se nem na qualidade
+// mínima couber (foto muito detalhada), diminui a resolução e tenta de novo.
+// Sem isso o Firestore recusa o documento inteiro e o erro não diz o porquê.
+function canvasParaDataUrl(c){
+  let canvas=c;
+  for(let tentativa=0; tentativa<4; tentativa++){
+    for(const q of [0.85,0.75,0.65,0.55,0.45]){
+      const url=canvas.toDataURL('image/jpeg',q);
+      if(url.length*0.75 <= SERMAO_BYTES_MAX) return url;
+    }
+    canvas=reduzirCanvas(canvas, 0.75);
+  }
+  return canvas.toDataURL('image/jpeg',0.45);
+}
+function comprimirImagem(fonte){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const escala=Math.min(1, SERMAO_LARGURA_MAX/img.width);
+      const c=document.createElement('canvas');
+      c.width=Math.max(1,Math.round(img.width*escala));
+      c.height=Math.max(1,Math.round(img.height*escala));
+      const ctx=c.getContext('2d');
+      ctx.fillStyle='#000'; ctx.fillRect(0,0,c.width,c.height);  // PNG transparente cai em fundo preto, que é o do telão
+      ctx.drawImage(img,0,0,c.width,c.height);
+      resolve(canvasParaDataUrl(c));
+    };
+    img.onerror=()=>reject(new Error('não consegui ler a imagem'));
+    img.src=fonte;
+  });
+}
+function lerArquivoComoDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=e=>resolve(e.target.result);
+    r.onerror=()=>reject(new Error('não consegui ler o arquivo'));
+    r.readAsDataURL(file);
+  });
+}
+
+// o pdf.js só é baixado quando alguém realmente importa um PDF
+let pdfLibPromise=null;
+function carregarPdfJs(){
+  if(!pdfLibPromise){
+    pdfLibPromise=import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4/build/pdf.min.mjs')
+      .then(lib=>{ lib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@4/build/pdf.worker.min.mjs'; return lib; })
+      .catch(err=>{ pdfLibPromise=null; throw err; });
+  }
+  return pdfLibPromise;
+}
+
+async function importarPdfComoSlides(file, sermon, aoProgredir){
+  const lib=await carregarPdfJs();
+  const pdf=await lib.getDocument({data: await file.arrayBuffer()}).promise;
+  const novos=[];
+  for(let n=1;n<=pdf.numPages;n++){
+    const page=await pdf.getPage(n);
+    const base=page.getViewport({scale:1});
+    const viewport=page.getViewport({scale: Math.min(2.5, SERMAO_LARGURA_MAX/base.width)});
+    const c=document.createElement('canvas');
+    c.width=Math.round(viewport.width); c.height=Math.round(viewport.height);
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,c.width,c.height);  // página de PDF costuma vir sem fundo
+    await page.render({canvasContext:ctx, viewport}).promise;
+    const dataUrl=canvasParaDataUrl(c);
+    const slideId=uid();
+    await saveSermonSlideCloud({id:slideId, sermonId:sermon.id, dataUrl});
+    AppState.sermonSlides[slideId]=dataUrl;
+    novos.push({id:uid(), type:'image', slideId, name:`${file.name} — pág. ${n}`});
+    if(aoProgredir) aoProgredir(n, pdf.numPages);
+  }
+  return novos;
+}
+
+function renderSermonLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<button class="btn accent sm" id="new-sermon-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Nova pregação</button>
+  <div id="sermon-list"></div>`;
+  container.appendChild(wrap);
+  wrap.querySelector('#new-sermon-btn').addEventListener('click',()=>{
+    const s={id:uid(), title:'Pregação '+new Date().toLocaleDateString('pt-BR'), items:[], createdAt:Date.now()};
+    AppState.sermons.unshift(s);
+    AppState.currentSermonId=s.id;
+    saveState(); saveSermonCloud(s); renderView();
+  });
+  const listEl=wrap.querySelector('#sermon-list');
+  if(AppState.sermons.length===0) listEl.innerHTML='<div class="empty-hint">Nenhuma pregação ainda</div>';
+  AppState.sermons.forEach(s=>{
+    const item=document.createElement('div');
+    item.className='song-item'+(AppState.currentSermonId===s.id?' selected':'');
+    item.innerHTML=`<div class="t">${escapeHtml(s.title||'(sem título)')}</div><div class="a">${(s.items||[]).length} itens</div>`;
+    item.addEventListener('click',async ()=>{
+      AppState.currentSermonId=s.id;
+      renderView();
+      if((s.items||[]).some(it=>it.type==='image' && !AppState.sermonSlides[it.slideId])){
+        await carregarSlidesDaPregacao(s.id);
+        if(AppState.currentSermonId===s.id) renderView();
+      }
+    });
+    listEl.appendChild(item);
+  });
+}
+
+function renderSermonCenter(container){
+  const sermon=currentSermon();
+  if(!sermon){ container.innerHTML='<div class="empty-hint">Selecione ou crie uma pregação à esquerda.</div>'; return; }
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Título da pregação</label><input id="sm-title" value="${escapeHtml(sermon.title||'')}"></div>
+    <div class="row" style="margin-bottom:6px;flex-wrap:wrap;">
+      <button class="btn" id="sm-pdf-btn"><i class="fa-solid fa-file-pdf"></i> Importar PDF</button>
+      <button class="btn ghost" id="sm-img-btn"><i class="fa-solid fa-image"></i> Imagens</button>
+      <button class="btn ghost" id="sm-text-btn"><i class="fa-solid fa-align-left"></i> Texto</button>
+      <button class="btn ghost" id="sm-song-btn"><i class="fa-solid fa-music"></i> Música</button>
+      <button class="btn ghost" id="sm-bible-btn"><i class="fa-solid fa-book-bible"></i> Versículo</button>
+      <input type="file" id="sm-pdf-input" accept="application/pdf" class="hidden">
+      <input type="file" id="sm-img-input" accept="image/*" multiple class="hidden">
+    </div>
+    <div id="sm-progress" class="empty-hint hidden" style="margin-bottom:8px;"></div>
+    <div class="panel-header" style="padding-left:0;border:none;">Sequência (${(sermon.items||[]).length}) — arraste para reordenar</div>
+    <div id="sermon-items"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn ghost sm" id="sm-del-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir pregação</button>
+    </div>`;
+  container.appendChild(wrap);
+  const q=sel=>wrap.querySelector(sel);
+  const gravar=()=>{ saveState(); saveSermonCloud(sermon); };
+  const progresso=q('#sm-progress');
+
+  q('#sm-title').addEventListener('input',e=>{ sermon.title=e.target.value; gravar(); });
+  q('#sm-del-btn').addEventListener('click',()=>{
+    if(!confirm('Excluir esta pregação e as imagens dela?')) return;
+    (sermon.items||[]).filter(it=>it.type==='image').forEach(it=>deleteSermonSlideCloud(it.slideId));
+    deleteSermonCloud(sermon.id);
+    AppState.sermons=AppState.sermons.filter(x=>x.id!==sermon.id);
+    AppState.currentSermonId=null;
+    saveState(); renderView();
+  });
+
+  const acrescentar=(novos)=>{
+    sermon.items=(sermon.items||[]).concat(novos);
+    gravar(); renderView();
+  };
+  q('#sm-text-btn').addEventListener('click',()=>{
+    const texto=prompt('Texto do slide (Enter separa as linhas):','');
+    if(texto===null || !texto.trim()) return;
+    acrescentar([{id:uid(), type:'text', text:texto.trim()}]);
+  });
+  q('#sm-song-btn').addEventListener('click',()=>{
+    if(!AppState.songs.length){ toast('Cadastre uma música primeiro.'); return; }
+    const lista=AppState.songs.map((s,i)=>`${i+1}. ${s.title}`).join('\n');
+    const escolha=prompt('Número da música a inserir:\n\n'+lista,'1');
+    const idx=Number(escolha)-1;
+    if(!AppState.songs[idx]) return;
+    acrescentar([{id:uid(), type:'song', songId:AppState.songs[idx].id, title:AppState.songs[idx].title}]);
+  });
+  q('#sm-bible-btn').addEventListener('click',()=>{
+    const ref=prompt('Referência (ex.: João 3:16) — só para você se achar na lista:','');
+    if(ref===null) return;
+    const texto=prompt('Cole aqui o texto do versículo:','');
+    if(texto===null || !texto.trim()) return;
+    acrescentar([{id:uid(), type:'bible', ref:(ref||'').trim(), text:texto.trim()}]);
+  });
+
+  q('#sm-img-btn').addEventListener('click',()=>q('#sm-img-input').click());
+  q('#sm-img-input').addEventListener('change',async e=>{
+    const files=[...e.target.files]; if(!files.length) return;
+    progresso.classList.remove('hidden');
+    const novos=[];
+    for(let i=0;i<files.length;i++){
+      progresso.textContent=`Processando imagem ${i+1} de ${files.length}…`;
+      try{
+        const dataUrl=await comprimirImagem(await lerArquivoComoDataUrl(files[i]));
+        const slideId=uid();
+        await saveSermonSlideCloud({id:slideId, sermonId:sermon.id, dataUrl});
+        AppState.sermonSlides[slideId]=dataUrl;
+        novos.push({id:uid(), type:'image', slideId, name:files[i].name});
+      }catch(err){ console.error(err); toast('Pulei "'+files[i].name+'": '+err.message); }
+    }
+    progresso.classList.add('hidden'); e.target.value='';
+    if(novos.length) acrescentar(novos); else renderView();
+  });
+
+  q('#sm-pdf-btn').addEventListener('click',()=>q('#sm-pdf-input').click());
+  q('#sm-pdf-input').addEventListener('change',async e=>{
+    const file=e.target.files[0]; e.target.value=''; if(!file) return;
+    progresso.classList.remove('hidden');
+    progresso.textContent='Abrindo o PDF…';
+    try{
+      const novos=await importarPdfComoSlides(file, sermon, (n,total)=>{
+        progresso.textContent=`Convertendo página ${n} de ${total}…`;
+      });
+      progresso.classList.add('hidden');
+      if(novos.length){ acrescentar(novos); toast(`${novos.length} páginas importadas`); }
+      else toast('O PDF não tinha páginas.');
+    }catch(err){
+      console.error('PDF:', err);
+      progresso.classList.add('hidden');
+      toast('Não consegui ler esse PDF ('+String(err.message).slice(0,50)+').');
+    }
+  });
+
+  const itemsEl=q('#sermon-items');
+  const items=sermon.items||[];
+  if(!items.length) itemsEl.innerHTML='<div class="empty-hint">Sequência vazia. Importe um PDF ou use os botões acima.</div>';
+  items.forEach((it,idx)=>{
+    const noAr = AppState.liveSermonItemId===it.id;
+    const row=document.createElement('div');
+    row.className='pl-item'+(noAr?' no-ar':'');
+    row.draggable=true; row.dataset.idx=idx;
+    const mini = it.type==='image' && AppState.sermonSlides[it.slideId]
+      ? `<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`
+      : `<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
+    row.innerHTML=`<i class="fa-solid fa-grip-vertical" style="color:var(--text-dim);font-size:11px;"></i>
+      <span style="color:var(--text-dim);font-size:11px;min-width:18px;">${idx+1}</span>
+      ${mini}
+      <span class="pl-title">${escapeHtml(rotuloItemPregacao(it))}</span>
+      ${noAr?'<span class="badge-noar">NO AR</span>':''}
+      <button class="pl-play-btn btn sm ghost" title="Projetar"><i class="fa-solid fa-play"></i></button>
+      <button class="pl-del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>`;
+    row.querySelector('.pl-play-btn').addEventListener('click',e=>{ e.stopPropagation(); projetarItemPregacao(sermon, idx); });
+    row.querySelector('.pl-del-btn').addEventListener('click',e=>{
+      e.stopPropagation();
+      if(it.type==='image') deleteSermonSlideCloud(it.slideId);
+      if(AppState.liveSermonItemId===it.id) AppState.liveSermonItemId=null;
+      sermon.items.splice(idx,1); gravar(); renderView(); updatePreview();
+    });
+    row.addEventListener('dragstart',()=>row.classList.add('dragging'));
+    row.addEventListener('dragend',()=>{ row.classList.remove('dragging'); gravar(); renderView(); });
+    row.addEventListener('dragover',ev=>{
+      ev.preventDefault();
+      const arrastando=itemsEl.querySelector('.dragging');
+      if(!arrastando||arrastando===row) return;
+      const r=row.getBoundingClientRect();
+      itemsEl.insertBefore(arrastando, (ev.clientY-r.top)<r.height/2 ? row : row.nextSibling);
+      const nova=[...itemsEl.children].map(c=>sermon.items[Number(c.dataset.idx)]);
+      sermon.items=nova.filter(Boolean);
+      [...itemsEl.children].forEach((c,i)=>c.dataset.idx=i);
+    });
+    itemsEl.appendChild(row);
+  });
+}
+
+function sairDaPregacao(){
+  const noAr=itemDaPregacaoNoAr();
+  // trocar de slide dentro da música que a própria pregação colocou no ar não
+  // é sair da pregação — só mudar de slide
+  if(noAr && noAr.type==='song' && noAr.songId===AppState.currentSongId) return;
+  AppState.sermonImage=null;
+  AppState.liveSermonItemId=null;
+}
+
+function projetarItemPregacao(sermon, idx, jaTentouCarregar){
+  const it=(sermon.items||[])[idx];
+  if(!it) return;
+  AppState.currentSermonId=sermon.id;
+  AppState.liveSermonItemId=it.id;
+  AppState.sermonImage=null;
+  AppState.previewOverride=null;
+  if(it.type==='image'){
+    const url=AppState.sermonSlides[it.slideId];
+    if(!url){
+      if(jaTentouCarregar){ toast('Esta imagem não está mais na nuvem.'); return; }
+      toast('Carregando a imagem…');
+      carregarSlidesDaPregacao(sermon.id).then(()=>{ projetarItemPregacao(sermon, idx, true); renderView(); });
+      return;
+    }
+    AppState.sermonImage=url;
+    AppState.currentSongId=null; AppState.currentSlideIndex=0;
+  } else if(it.type==='text' || it.type==='bible'){
+    AppState.previewOverride={type:'sermon', text: (it.type==='bible' && it.ref) ? (it.text+'\n\n'+it.ref) : it.text};
+    AppState.currentSongId=null; AppState.currentSlideIndex=0;
+  } else if(it.type==='song'){
+    AppState.currentSongId=it.songId;
+    AppState.currentSlideIndex=0;
+  }
+  updatePreview();
+  if(AppState.view==='sermon') renderView();
+}
+
+// devolve true se conseguiu andar na sequência da pregação
+function andarNaPregacao(passo){
+  const s=currentSermon();
+  if(!s || !AppState.liveSermonItemId) return false;
+  const i=(s.items||[]).findIndex(x=>x.id===AppState.liveSermonItemId);
+  if(i<0) return false;
+  const alvo=i+passo;
+  if(alvo<0 || alvo>=s.items.length) return false;
+  projetarItemPregacao(s, alvo);
+  return true;
+}
+function itemDaPregacaoNoAr(){
+  const s=currentSermon();
+  if(!s || !AppState.liveSermonItemId) return null;
+  return (s.items||[]).find(x=>x.id===AppState.liveSermonItemId) || null;
+}
+
+function currentSermon(){ return AppState.sermons.find(s=>s.id===AppState.currentSermonId) || null; }
+function rotuloItemPregacao(it){
+  if(it.type==='image') return it.name || 'Imagem';
+  if(it.type==='text')  return (it.text||'').split('\n')[0].slice(0,60) || '(texto vazio)';
+  if(it.type==='song'){ const s=AppState.songs.find(x=>x.id===it.songId); return s? s.title : (it.title||'(música removida)'); }
+  if(it.type==='bible') return it.ref || 'Versículo';
+  return it.type;
+}
+const ICONE_ITEM={image:'fa-image', text:'fa-align-left', song:'fa-music', bible:'fa-book-bible'};
 
 /* =========================================================
    PREVIEW / PROJECTION / STAGE
@@ -2011,9 +2392,10 @@ function updatePreview(){
   applyBackground(projBg, document.getElementById('projection-bg-video'), document.getElementById('projection-bg-dim'), theme, AppState.blackout);
 
   const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
+  const imagemNaTela = activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage);
   [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
     const img=document.getElementById(id);
-    if(activeMedia){ img.src=activeMedia.dataUrl; img.style.display='block'; }
+    if(imagemNaTela){ if(img.getAttribute('src')!==imagemNaTela) img.src=imagemNaTela; img.style.display='block'; }
     else { img.style.display='none'; }
   });
 
@@ -2038,11 +2420,33 @@ document.getElementById('tr-blackout').addEventListener('click',()=>{AppState.bl
 document.getElementById('tr-hidetext').addEventListener('click',()=>{AppState.textHidden=!AppState.textHidden; updatePreview();});
 function goNextSlide(){
   const song=currentSong();
+  const noAr=itemDaPregacaoNoAr();
+  // numa pregação, a seta anda pelos slides da música até o último e só
+  // então passa para o próximo item da sequência
+  if(noAr){
+    if(noAr.type==='song' && song && AppState.currentSlideIndex < song.slides.length-1){
+      AppState.previewOverride=null; AppState.currentSlideIndex++; updatePreview();
+      if(AppState.view==='songs') renderView();
+      return;
+    }
+    if(andarNaPregacao(1)) return;
+    return;
+  }
   AppState.previewOverride=null;
   if(song && AppState.currentSlideIndex < song.slides.length-1){ AppState.currentSlideIndex++; updatePreview(); if(AppState.view==='songs') renderView(); }
 }
 function goPrevSlide(){
   const song=currentSong();
+  const noAr=itemDaPregacaoNoAr();
+  if(noAr){
+    if(noAr.type==='song' && song && AppState.currentSlideIndex>0){
+      AppState.previewOverride=null; AppState.currentSlideIndex--; updatePreview();
+      if(AppState.view==='songs') renderView();
+      return;
+    }
+    if(andarNaPregacao(-1)) return;
+    return;
+  }
   AppState.previewOverride=null;
   if(song && AppState.currentSlideIndex>0){ AppState.currentSlideIndex--; updatePreview(); if(AppState.view==='songs') renderView(); }
 }
@@ -2081,7 +2485,7 @@ document.addEventListener('keydown',(e)=>{
     const song=currentSong();
     const idx=Number(e.key)-1;
     if(song && song.slides[idx]){
-      AppState.currentSlideIndex=idx; AppState.previewOverride=null; updatePreview();
+      AppState.currentSlideIndex=idx; AppState.previewOverride=null; sairDaPregacao(); updatePreview();
       if(AppState.view==='songs') renderView();
     }
   }
