@@ -408,7 +408,8 @@ body.display-mode #display-live-dot{display:flex;}
       <div style="margin-top:14px;">
         <div class="panel-header" style="padding:0 0 8px 0;border:none;">Mídia (dízimo/avisos)</div>
         <button class="btn ghost sm" id="media-upload-btn" style="width:100%;margin-bottom:6px;"><i class="fa-solid fa-plus"></i> Adicionar imagem</button>
-        <button class="btn ghost sm" id="media-video-btn" style="width:100%;margin-bottom:8px;"><i class="fa-solid fa-film"></i> Adicionar vídeo (link)</button>
+        <button class="btn ghost sm" id="media-video-btn" style="width:100%;margin-bottom:8px;"><i class="fa-solid fa-film"></i> Adicionar vídeo</button>
+        <input type="file" id="media-video-input" accept="video/*" class="hidden">
         <input type="file" id="media-file-input" accept="image/*" class="hidden" multiple>
         <div id="media-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;"></div>
       </div>
@@ -506,17 +507,32 @@ async function getLocalVideo(key){
   });
 }
 const localVideoUrlCache = {};
-function resolveVideoSrc(theme){
-  if(theme.background.type!=='video' || !theme.background.value) return null;
-  if(theme.background.value.startsWith('local:')){
-    const key = theme.background.value.slice(6);
+// Vale para o fundo do tema, para o aviso e para o item de pregação:
+// 'local:<chave>' vem do IndexedDB deste aparelho, o resto é endereço.
+function resolverUrlVideo(valor){
+  if(!valor) return null;
+  const v=String(valor);
+  if(v.startsWith('local:')){
+    const key=v.slice(6);
     if(localVideoUrlCache[key]) return localVideoUrlCache[key];
     getLocalVideo(key).then(blob=>{
-      if(blob){ localVideoUrlCache[key]=URL.createObjectURL(blob); updatePreview(); }
+      if(blob){ localVideoUrlCache[key]=URL.createObjectURL(blob); updatePreview(); renderMediaPanel(); }
     }).catch(()=>{});
-    return null; // ainda carregando, ou vídeo não existe neste aparelho
+    return null; // ainda carregando, ou o vídeo não está neste aparelho
   }
-  return theme.background.value; // URL externa/legada
+  return v;
+}
+function resolveVideoSrc(theme){
+  if(theme.background.type!=='video') return null;
+  return resolverUrlVideo(theme.background.value);
+}
+async function deleteLocalVideo(key){
+  try{
+    const db=await openMediaDB();
+    const tx=db.transaction('videos','readwrite');
+    tx.objectStore('videos').delete(key);
+  }catch(e){}
+  if(localVideoUrlCache[key]){ URL.revokeObjectURL(localVideoUrlCache[key]); delete localVideoUrlCache[key]; }
 }
 const songsDocRef = doc(db,'holyrics_data','songs');
 const songsCollRef = collection(db,'holyrics_songs');
@@ -1727,11 +1743,15 @@ function renderMediaPanel(){
     const ehVideo = m.type==='video';
     const thumb=document.createElement('div');
     thumb.style.cssText='position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid '+(AppState.activeMediaId===m.id?'var(--accent)':'transparent');
+    thumb.title = ehVideo && String(m.url||'').startsWith('local:') ? (m.name||'Vídeo')+' — guardado só neste computador' : (m.name||'');
     // no vídeo a miniatura é só o primeiro quadro (preload=metadata): deixar
     // vários tocando aqui no painel não serve pra nada e come processador
+    const urlVideo = ehVideo ? resolverUrlVideo(m.url) : null;
     const midia = ehVideo
-      ? `<video src="${escapeHtml(m.url||'')}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;pointer-events:none;"></video>
-         <span style="position:absolute;bottom:2px;left:3px;font-size:9px;color:#fff;text-shadow:0 1px 3px #000;"><i class="fa-solid fa-film"></i></span>`
+      ? (urlVideo
+          ? `<video src="${urlVideo}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;pointer-events:none;"></video>`
+          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#12172b;color:var(--text-dim);font-size:16px;"><i class="fa-solid fa-film"></i></div>`)
+        + `<span style="position:absolute;bottom:2px;left:3px;font-size:9px;color:#fff;text-shadow:0 1px 3px #000;"><i class="fa-solid fa-film"></i></span>`
       : `<img src="${m.dataUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`;
     thumb.innerHTML=`${midia}
       <button style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:4px;width:16px;height:16px;font-size:9px;color:#fff;" title="Remover">✕</button>`;
@@ -1742,6 +1762,7 @@ function renderMediaPanel(){
     thumb.querySelector('button').addEventListener('click',(e)=>{
       e.stopPropagation();
       deleteMediaCloud(m.id);
+      if(ehVideo && String(m.url||'').startsWith('local:')) deleteLocalVideo(String(m.url).slice(6));
       AppState.media = AppState.media.filter(x=>x.id!==m.id);
       if(AppState.activeMediaId===m.id) AppState.activeMediaId=null;
       saveState(); renderMediaPanel(); updatePreview();
@@ -1752,15 +1773,18 @@ function renderMediaPanel(){
 document.getElementById('media-upload-btn').addEventListener('click',()=>document.getElementById('media-file-input').click());
 // vídeo entra por link, não por upload: um arquivo de vídeo não cabe no
 // documento do Firestore (limite de 1MB), então ele fica hospedado e aqui vai só o endereço
-document.getElementById('media-video-btn').addEventListener('click',()=>{
-  const url=(prompt('Cole o link do vídeo.\n\nEle roda em loop, com a mesclagem entre os loops já ligada.','')||'').trim();
-  if(!url) return;
-  if(!/^(https?:\/\/|\.?\/|videos\/)/i.test(url)){ toast('Cole o endereço completo, começando com https://'); return; }
-  const nome=((prompt('Nome pra identificar na lista:','Vídeo')||'').trim())||'Vídeo';
-  const item={id:uid(), type:'video', name:nome, url};
-  AppState.media.push(item);
-  saveState(); saveMediaCloud(item); renderMediaPanel();
-  toast('Vídeo adicionado — clique nele pra jogar na tela');
+document.getElementById('media-video-btn').addEventListener('click',()=>document.getElementById('media-video-input').click());
+document.getElementById('media-video-input').addEventListener('change',async (e)=>{
+  const file=e.target.files[0]; e.target.value=''; if(!file) return;
+  const id=uid(), chave='media_'+id;
+  toast('Salvando o vídeo neste computador…');
+  try{
+    await saveLocalVideo(chave, file);
+    const item={id, type:'video', name:file.name, url:'local:'+chave};
+    AppState.media.push(item);
+    saveState(); saveMediaCloud(item); renderMediaPanel();
+    toast('Vídeo pronto. Ele fica só neste computador.');
+  }catch(err){ console.error(err); toast('Não consegui guardar esse vídeo aqui.'); }
 });
 document.getElementById('media-file-input').addEventListener('change',(e)=>{
   [...e.target.files].forEach(file=>{
@@ -2041,6 +2065,7 @@ function renderSermonCenter(container){
       <button class="btn ghost" id="sm-bible-btn"><i class="fa-solid fa-book-bible"></i> Versículo</button>
       <input type="file" id="sm-pdf-input" accept="application/pdf" class="hidden">
       <input type="file" id="sm-img-input" accept="image/*" multiple class="hidden">
+      <input type="file" id="sm-video-input" accept="video/*" class="hidden">
     </div>
     <div id="sm-progress" class="empty-hint hidden" style="margin-bottom:8px;"></div>
     <div class="panel-header" style="padding-left:0;border:none;">Sequência (${(sermon.items||[]).length}) — arraste para reordenar</div>
@@ -2057,6 +2082,7 @@ function renderSermonCenter(container){
   q('#sm-del-btn').addEventListener('click',()=>{
     if(!confirm('Excluir esta pregação e as imagens dela?')) return;
     (sermon.items||[]).filter(it=>it.type==='image').forEach(it=>deleteSermonSlideCloud(it.slideId));
+    (sermon.items||[]).filter(it=>it.type==='video' && String(it.url||'').startsWith('local:')).forEach(it=>deleteLocalVideo(String(it.url).slice(6)));
     deleteSermonCloud(sermon.id);
     AppState.sermons=AppState.sermons.filter(x=>x.id!==sermon.id);
     AppState.currentSermonId=null;
@@ -2067,14 +2093,21 @@ function renderSermonCenter(container){
     sermon.items=(sermon.items||[]).concat(novos);
     gravar(); renderView();
   };
-  q('#sm-video-btn').addEventListener('click',()=>{
-    // igual ao aviso em vídeo: entra por link, porque arquivo de vídeo não cabe
-    // no documento do Firestore
-    const url=(prompt('Cole o link do vídeo.\n\nEle roda em loop com mesclagem enquanto estiver no ar.','')||'').trim();
-    if(!url) return;
-    if(!/^(https?:\/\/|\.?\/|videos\/)/i.test(url)){ toast('Cole o endereço completo, começando com https://'); return; }
-    const nome=((prompt('Nome pra identificar na sequência:','Vídeo')||'').trim())||'Vídeo';
-    acrescentar([{id:uid(), type:'video', url, name:nome}]);
+  q('#sm-video-btn').addEventListener('click',()=>q('#sm-video-input').click());
+  q('#sm-video-input').addEventListener('change',async ev=>{
+    const file=ev.target.files[0]; ev.target.value=''; if(!file) return;
+    const itemId=uid(), chave='sermao_'+itemId;
+    progresso.classList.remove('hidden');
+    progresso.textContent='Salvando o vídeo neste computador…';
+    try{
+      await saveLocalVideo(chave, file);
+      progresso.classList.add('hidden');
+      acrescentar([{id:itemId, type:'video', url:'local:'+chave, name:file.name}]);
+      toast('Vídeo pronto. Ele fica só neste computador.');
+    }catch(err){
+      console.error(err); progresso.classList.add('hidden');
+      toast('Não consegui guardar esse vídeo aqui.');
+    }
   });
   q('#sm-text-btn').addEventListener('click',()=>{
     const texto=prompt('Texto do slide (Enter separa as linhas):','');
@@ -2146,8 +2179,8 @@ function renderSermonCenter(container){
     let mini;
     if(it.type==='image' && AppState.sermonSlides[it.slideId]){
       mini=`<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`;
-    } else if(it.type==='video' && it.url){
-      mini=`<video src="${escapeHtml(it.url)}" muted playsinline preload="metadata" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;pointer-events:none;"></video>`;
+    } else if(it.type==='video' && resolverUrlVideo(it.url)){
+      mini=`<video src="${resolverUrlVideo(it.url)}" muted playsinline preload="metadata" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;pointer-events:none;"></video>`;
     } else {
       mini=`<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
     }
@@ -2162,6 +2195,7 @@ function renderSermonCenter(container){
     row.querySelector('.pl-del-btn').addEventListener('click',e=>{
       e.stopPropagation();
       if(it.type==='image') deleteSermonSlideCloud(it.slideId);
+      if(it.type==='video' && String(it.url||'').startsWith('local:')) deleteLocalVideo(String(it.url).slice(6));
       if(AppState.liveSermonItemId===it.id) AppState.liveSermonItemId=null;
       sermon.items.splice(idx,1); gravar(); renderView(); updatePreview();
     });
@@ -2243,7 +2277,7 @@ function itemDaPregacaoNoAr(){
 function currentSermon(){ return AppState.sermons.find(s=>s.id===AppState.currentSermonId) || null; }
 function rotuloItemPregacao(it){
   if(it.type==='image') return it.name || 'Imagem';
-  if(it.type==='video') return it.name || 'Vídeo';
+  if(it.type==='video') return (it.name || 'Vídeo') + (String(it.url||'').startsWith('local:') ? '  · só neste computador' : '');
   if(it.type==='text')  return (it.text||'').split('\n')[0].slice(0,60) || '(texto vazio)';
   if(it.type==='song'){ const s=AppState.songs.find(x=>x.id===it.songId); return s? s.title : (it.title||'(música removida)'); }
   if(it.type==='bible') return it.ref || 'Versículo';
@@ -2442,8 +2476,9 @@ function updatePreview(){
 
   const activeMedia = AppState.media.find(m=>m.id===AppState.activeMediaId);
   // aviso lateral tem prioridade sobre o item da pregação
-  const videoNaTela = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
+  const videoBruto = (activeMedia && activeMedia.type==='video') ? (activeMedia.url||null)
     : (!activeMedia && !AppState.blackout ? AppState.sermonVideo : null);
+  const videoNaTela = resolverUrlVideo(videoBruto);
   const imagemNaTela = videoNaTela ? null
     : (activeMedia ? activeMedia.dataUrl : (AppState.blackout ? null : AppState.sermonImage));
   [['preview-media-img'],['projection-media-img']].forEach(([id])=>{
