@@ -1538,6 +1538,8 @@ function renderThemesCenter(container){
           <button class="btn ghost sm hidden" id="th-bg-upload-btn"><i class="fa-solid fa-image"></i> Escolher</button>
           <input type="file" id="th-bg-file" accept="image/*" class="hidden">
           <input type="file" id="th-bg-video-file" accept="video/*" class="hidden">
+          <input type="text" id="th-bg-video-url" class="hidden" placeholder="…ou cole o link do vídeo (aí sincroniza em todos)" style="flex:1;min-width:240px;"
+                 value="${theme.background.type==='video' && !String(theme.background.value||'').startsWith('local:') ? escapeHtml(theme.background.value||'') : ''}">
         </div>
       </div>
       <div class="field"><label>Escurecer fundo p/ legibilidade (${theme.background.opacity}%)</label>
@@ -1586,6 +1588,7 @@ function renderThemesCenter(container){
     q('#th-bg-color').classList.toggle('hidden', t!=='color');
     q('#th-bg-upload-btn').classList.toggle('hidden', t!=='image' && t!=='video');
     q('#th-bg-upload-btn').innerHTML = t==='video' ? '<i class="fa-solid fa-video"></i> Escolher vídeo' : '<i class="fa-solid fa-image"></i> Escolher imagem';
+    q('#th-bg-video-url').classList.toggle('hidden', t!=='video');
   };
   syncBgControls();
   q('#th-bg-type').addEventListener('change',e=>{
@@ -1611,9 +1614,23 @@ function renderThemesCenter(container){
     try{
       await saveLocalVideo(theme.id, file);
       theme.background.type='video'; theme.background.value='local:'+theme.id;
+      q('#th-bg-video-url').value='';
       apply();
-      toast('Vídeo salvo! (fica só neste computador, não sincroniza pro celular)');
+      toast('Vídeo salvo só neste computador. Para sincronizar, use o campo de link ao lado.');
     }catch(err){ console.error(err); toast('Erro ao salvar vídeo neste computador.'); }
+  });
+  // Vídeo por link: o endereço vai pro Firestore junto com o tema, então todo
+  // aparelho carrega o mesmo vídeo — inclusive o Modo TV. É o caminho para
+  // sincronizar sem Firebase Storage (que exige o plano pago).
+  q('#th-bg-video-url').addEventListener('change',e=>{
+    const url=e.target.value.trim();
+    if(!url){ return; }
+    if(!/^(https?:\/\/|\.?\/|videos\/)/i.test(url)){ toast('Cole o endereço completo do vídeo (começando com https://).'); return; }
+    theme.background.type='video';
+    theme.background.value=url;
+    q('#th-bg-type').value='video';
+    apply();
+    toast('Vídeo por link aplicado — agora sincroniza em todos os aparelhos');
   });
   q('#th-font-color').addEventListener('input',e=>{theme.font.color=e.target.value; apply();});
   q('#th-font-size').addEventListener('input',e=>{theme.font.size=Number(e.target.value); apply();});
