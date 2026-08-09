@@ -211,6 +211,8 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 /* Playlist */
 #playlist-items,#sermon-items{display:flex;flex-direction:column;gap:6px;}
 .pl-item.no-ar{border:1px solid var(--accent);box-shadow:0 0 12px rgba(255,60,90,.25);}
+.pl-item .badge-noar{display:none;}
+.pl-item.no-ar .badge-noar{display:inline-block;}
 .badge-noar{background:var(--accent);color:#fff;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:99px;flex:none;}
 .pl-item{
   display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
@@ -628,8 +630,16 @@ function saveSongCloud(song){
 function deleteSongCloud(id){ deleteDoc(doc(songsCollRef, id)).catch(()=>{}); }
 
 let liveSaveTimer=null;
+// Identifica esta aba nesta sessão. Sem isso, o aparelho recebe de volta o
+// estado que ele mesmo acabou de escrever e reaplica em looping.
+const CLIENT_ID = Math.random().toString(36).slice(2)+Date.now().toString(36);
+let aplicandoLive = false;        // estou aplicando o que veio de outro aparelho
+let podePublicarLive = false;     // só publico depois de ler o que já está no ar
+
 function pushLiveState(){
-  if(isTvMode) return; // TV nunca escreve, só escuta
+  if(isTvMode) return;            // TV nunca escreve, só escuta
+  if(aplicandoLive) return;       // veio de outro aparelho: não devolve o eco
+  if(!podePublicarLive) return;   // ainda não li o estado atual: não atropelo quem já está no ar
   clearTimeout(liveSaveTimer);
   liveSaveTimer=setTimeout(()=>{
     setDoc(liveDocRef, {
@@ -643,9 +653,36 @@ function pushLiveState(){
       sermonImage: AppState.sermonImage || null,
       sermonVideo: AppState.sermonVideo || null,
       sermonItemId: AppState.liveSermonItemId || null,
+      origem: CLIENT_ID,
       updatedAt: Date.now(),
     }).catch(err=>console.error('Erro ao enviar estado ao vivo:', err));
   }, 120);
+}
+
+function aplicarEstadoLive(d){
+  if(!d) return;
+  aplicandoLive=true;
+  try{
+    const musicaMudou = (d.songId||null)!==AppState.currentSongId;
+    AppState.currentSongId = d.songId || null;
+    AppState.currentSlideIndex = d.slideIndex || 0;
+    AppState.blackout = !!d.blackout;
+    AppState.textHidden = !!d.textHidden;
+    if(d.themeId) AppState.activeThemeId = d.themeId;
+    AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
+    AppState.activeMediaId = d.activeMediaId || null;
+    AppState.sermonImage = d.sermonImage || null;
+    AppState.sermonVideo = d.sermonVideo || null;
+    AppState.liveSermonItemId = d.sermonItemId || null;
+    updatePreview();
+    if(!isTvMode){
+      renderMediaPanel();
+      // só re-renderiza a tela quando faz diferença e ninguém está digitando:
+      // recriar a tela no meio de uma edição faria o campo perder o foco
+      const editando = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+      if(musicaMudou && !editando) renderView();
+    }
+  } finally { aplicandoLive=false; }
 }
 
 async function initTvMode(){
@@ -663,19 +700,7 @@ async function initTvMode(){
   onSnapshot(themesCollRef, snap=>{ if(!snap.empty) AppState.themes = snap.docs.map(d=>d.data()); applyLiveToPreview(); });
   onSnapshot(mediaCollRef, snap=>{ AppState.media = snap.docs.map(d=>d.data()); applyLiveToPreview(); });
   onSnapshot(liveDocRef, snap=>{
-    if(!snap.exists()) return;
-    const d = snap.data();
-    AppState.currentSongId = d.songId || null;
-    AppState.currentSlideIndex = d.slideIndex || 0;
-    AppState.blackout = !!d.blackout;
-    AppState.textHidden = !!d.textHidden;
-    AppState.activeThemeId = d.themeId || AppState.activeThemeId;
-    AppState.previewOverride = d.overrideText ? {type:'live', text:d.overrideText} : null;
-    AppState.activeMediaId = d.activeMediaId || null;
-    AppState.sermonImage = d.sermonImage || null;
-    AppState.sermonVideo = d.sermonVideo || null;
-    AppState.liveSermonItemId = d.sermonItemId || null;
-    applyLiveToPreview();
+    if(snap.exists()) aplicarEstadoLive(snap.data());
   });
 
   document.getElementById('display-start').classList.add('show');
@@ -692,7 +717,7 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef)]);
     if(!songsSnap.empty) AppState.songs = songsSnap.docs.map(d=>d.data());
     if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
     if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
@@ -701,11 +726,17 @@ async function initCloudSync(){
     if(!mediaSnap.empty) AppState.media = mediaSnap.docs.map(d=>d.data());
     AppState.sermons = sermonsSnap.docs.map(d=>d.data());
     seedDefaultSongs();
-    renderView(); renderMediaPanel(); updatePreview();
+    renderView(); renderMediaPanel();
+    // adota o que já está na tela antes de liberar a publicação: abrir o app
+    // num segundo aparelho não pode derrubar o que o primeiro colocou no telão
+    if(liveSnap.exists()) aplicarEstadoLive(liveSnap.data());
+    else updatePreview();
+    podePublicarLive = true;
     updateSyncStatus('synced');
   }catch(err){
     console.warn('Sem conexão com o Firestore, usando cache local.', err);
     updateSyncStatus('offline');
+    podePublicarLive = true;   // sem nuvem, este aparelho comanda sozinho
   }
   onSnapshot(songsCollRef, {includeMetadataChanges:true}, snap=>{
     if(snap.metadata.hasPendingWrites) return;
@@ -740,6 +771,14 @@ async function initCloudSync(){
     AppState.sermons = snap.docs.map(d=>d.data());
     if(AppState.view==='sermon') renderView();
   });
+  // Mac e celular seguem o mesmo estado ao vivo: quem clicar em qualquer um
+  // dos dois manda na tela, e o outro acompanha em vez de brigar
+  onSnapshot(liveDocRef, snap=>{
+    if(!snap.exists()) return;
+    const d=snap.data();
+    if(d.origem===CLIENT_ID) return;   // é o eco do que eu mesmo escrevi
+    aplicarEstadoLive(d);
+  });
 }
 
 /* =========================================================
@@ -768,15 +807,26 @@ const AppState = {
   mobileActiveTab: 'bible',
 };
 
+// O localStorage tem cota (poucos MB) e imagem em base64 enche rápido. Se um
+// setItem estoura e a exceção sobe, ela derruba o resto do saveState — e, pior,
+// derruba também a chamada que vinha DEPOIS dele no mesmo clique, que costuma
+// ser justamente a gravação na nuvem. Era assim que um item recém-adicionado
+// aparecia na tela e sumia no recarregamento: nunca tinha sido salvo.
+function guardarLocal(chave, valor){
+  try{ localStorage.setItem(chave, valor); return true; }
+  catch(e){ return false; }
+}
 function saveState(){
-  // cache local instantâneo (funciona offline)
-  localStorage.setItem('holyrics_songs', JSON.stringify(AppState.songs));
-  localStorage.setItem('holyrics_themes', JSON.stringify(AppState.themes));
-  localStorage.setItem('holyrics_playlists', JSON.stringify(AppState.playlists));
-  try{ localStorage.setItem('holyrics_sermons', JSON.stringify(AppState.sermons)); }catch(e){}
-  localStorage.setItem('holyrics_active_theme', AppState.activeThemeId || '');
-  try{ localStorage.setItem('holyrics_media', JSON.stringify(AppState.media)); }catch(e){}
-  // sincroniza com o Firestore (debounced)
+  // cache local instantâneo (funciona offline) — a nuvem é a fonte da verdade
+  guardarLocal('holyrics_songs', JSON.stringify(AppState.songs));
+  guardarLocal('holyrics_themes', JSON.stringify(AppState.themes));
+  guardarLocal('holyrics_playlists', JSON.stringify(AppState.playlists));
+  guardarLocal('holyrics_sermons', JSON.stringify(AppState.sermons));
+  guardarLocal('holyrics_active_theme', AppState.activeThemeId || '');
+  if(!guardarLocal('holyrics_media', JSON.stringify(AppState.media))){
+    // sem as imagens embutidas o cache ainda serve pra lista; elas voltam da nuvem
+    guardarLocal('holyrics_media', JSON.stringify(AppState.media.map(m=>m.dataUrl?Object.assign({},m,{dataUrl:''}):m)));
+  }
   scheduleCloudSave();
 }
 function loadState(){
@@ -1784,7 +1834,7 @@ document.getElementById('media-video-input').addEventListener('change',async (e)
     await saveLocalVideo(chave, file);
     const item={id, type:'video', name:file.name, url:'local:'+chave};
     AppState.media.push(item);
-    saveState(); saveMediaCloud(item); renderMediaPanel();
+    saveMediaCloud(item); saveState(); renderMediaPanel();
     toast('Vídeo pronto. Ele fica só neste computador.');
   }catch(err){ console.error(err); toast('Não consegui guardar esse vídeo aqui.'); }
 });
@@ -1794,7 +1844,7 @@ document.getElementById('media-file-input').addEventListener('change',(e)=>{
     reader.onload=ev=>{
       const item={id:uid(), name:file.name, dataUrl:ev.target.result};
       AppState.media.push(item);
-      saveState(); saveMediaCloud(item); renderMediaPanel();
+      saveMediaCloud(item); saveState(); renderMediaPanel();
     };
     reader.readAsDataURL(file);
   });
@@ -2077,7 +2127,7 @@ function renderSermonCenter(container){
     </div>`;
   container.appendChild(wrap);
   const q=sel=>wrap.querySelector(sel);
-  const gravar=()=>{ saveState(); saveSermonCloud(sermon); };
+  const gravar=()=>{ saveSermonCloud(sermon); saveState(); };
   const progresso=q('#sm-progress');
 
   q('#sm-title').addEventListener('input',e=>{ sermon.title=e.target.value; gravar(); });
@@ -2177,7 +2227,7 @@ function renderSermonCenter(container){
     const noAr = AppState.liveSermonItemId===it.id;
     const row=document.createElement('div');
     row.className='pl-item'+(noAr?' no-ar':'');
-    row.draggable=true; row.dataset.idx=idx;
+    row.draggable=true; row.dataset.idx=idx; row.dataset.itemId=it.id;
     let mini;
     if(it.type==='image' && AppState.sermonSlides[it.slideId]){
       mini=`<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`;
@@ -2190,7 +2240,7 @@ function renderSermonCenter(container){
       <span style="color:var(--text-dim);font-size:11px;min-width:18px;">${idx+1}</span>
       ${mini}
       <span class="pl-title">${escapeHtml(rotuloItemPregacao(it))}</span>
-      ${noAr?'<span class="badge-noar">NO AR</span>':''}
+      <span class="badge-noar">NO AR</span>
       <button class="pl-play-btn btn sm ghost" title="Projetar"><i class="fa-solid fa-play"></i></button>
       <button class="pl-del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>`;
     row.querySelector('.pl-play-btn').addEventListener('click',e=>{ e.stopPropagation(); projetarItemPregacao(sermon, idx); });
@@ -2530,6 +2580,9 @@ function updatePreview(){
 
   // update slide list highlight without full rerender (cheap)
   document.querySelectorAll('.slide-card').forEach((c,i)=>c.classList.toggle('current', Number(c.dataset.idx)===AppState.currentSlideIndex));
+  document.querySelectorAll('#sermon-items .pl-item').forEach(el=>{
+    el.classList.toggle('no-ar', !!AppState.liveSermonItemId && el.dataset.itemId===AppState.liveSermonItemId);
+  });
   renderSlideStrip();
 
   pushLiveState();
