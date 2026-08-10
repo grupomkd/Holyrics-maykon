@@ -212,6 +212,8 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 #playlist-items,#sermon-items{display:flex;flex-direction:column;gap:6px;}
 .pl-item.no-ar{border:1px solid var(--accent);box-shadow:0 0 12px rgba(255,60,90,.25);}
 .pl-item .badge-noar{display:none;}
+.mini-slide{width:132px;height:74px;object-fit:cover;border-radius:5px;flex:none;background:#0b0f1e;}
+#sermon-items .pl-item{align-items:center;}
 .transport button.ligado,button.ligado{background:var(--accent)!important;color:#fff!important;}
 .pl-item.no-ar .badge-noar{display:inline-block;}
 .badge-noar{background:var(--accent);color:#fff;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:99px;flex:none;}
@@ -268,6 +270,12 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
 /* ===== MODO TV (display remoto) ===== */
 body.display-mode #topbar,
 body.display-mode #main{ display:none !important; }
+#tv-fullscreen-btn{
+  position:fixed;top:14px;right:14px;z-index:20002;display:none;
+  background:rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:8px 14px;font-size:12px;
+  backdrop-filter:blur(6px);
+}
+#tv-fullscreen-btn.show{display:block;}
 #display-start{
   position:fixed;inset:0;background:#0a0a14;color:#fff;z-index:20000;
   display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;
@@ -288,11 +296,24 @@ body.display-mode #display-live-dot{display:flex;}
 #display-live-dot span{width:6px;height:6px;border-radius:50%;background:#2ecc71;display:inline-block;}
 
 /* ===== RESPONSIVO / MOBILE ===== */
+#mini-live{display:none;}   /* no computador o preview grande já fica ao lado */
 #bottom-tabs{ display:none; }
 #mobile-back-btn, #mobile-title{ display:none; }
 
 @media (max-width: 860px){
   html,body{ height:100%; overflow:hidden; }
+  #mini-live{
+    display:flex; align-items:center; gap:9px; padding:7px 12px; cursor:pointer;
+    background:var(--surface-2); border-bottom:1px solid rgba(255,255,255,.07);
+  }
+  #mini-live-thumb{
+    width:76px; height:43px; border-radius:4px; flex:none; background:#000;
+    background-size:cover; background-position:center; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #mini-live-thumb span{font-size:8px;line-height:1.15;color:#fff;text-align:center;padding:2px;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+  #mini-live-text{flex:1;font-size:12px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   #topbar{
     height:52px; padding:0 10px; gap:8px; flex-wrap:nowrap;
   }
@@ -364,11 +385,16 @@ body.display-mode #display-live-dot{display:flex;}
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
     <span id="sync-label">Conectando...</span>
   </span>
-  <button class="topbar-action" id="open-tv-btn" title="Abrir Modo TV em nova aba (pra deixar rodando no telão)"><i class="fa-solid fa-tv"></i> Modo TV</button>
+  <button class="topbar-action" id="open-tv-btn" title="Abre o Modo TV numa janela separada: arraste para o telão e clique em tela cheia"><i class="fa-solid fa-tv"></i> Modo TV</button>
   <button class="topbar-action" id="stage-btn" title="Tela de retorno (Stage View)"><i class="fa-solid fa-tv"></i> Retorno</button>
   <button id="present-btn"><i class="fa-solid fa-play"></i> Projetar</button>
 </div>
 
+<div id="mini-live" title="Toque para abrir o Ao Vivo">
+  <div id="mini-live-thumb"></div>
+  <div id="mini-live-text">Nada no ar</div>
+  <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:11px;"></i>
+</div>
 <div id="main">
 
   <!-- LEFT PANEL -->
@@ -455,6 +481,7 @@ body.display-mode #display-live-dot{display:flex;}
 
 <div class="toast" id="toast"></div>
 
+<button id="tv-fullscreen-btn" title="Voltar à tela cheia"><i class="fa-solid fa-expand"></i> Tela cheia</button>
 <div id="display-start">
   <i class="fa-solid fa-tv" style="font-size:48px;color:var(--accent);"></i>
   <h1 style="margin:0;font-size:22px;">Modo TV</h1>
@@ -704,11 +731,25 @@ async function initTvMode(){
     if(snap.exists()) aplicarEstadoLive(snap.data());
   });
 
+  // A tela cheia só pode ser pedida a partir de um clique, então quando o
+  // navegador solta (troca de aba, ESC) não dá pra voltar sozinho: fica um
+  // botão à mão em vez de deixar o telão com a barra do navegador aparecendo.
+  const btFull=document.getElementById('tv-fullscreen-btn');
+  const revisarTelaCheia=()=>{
+    const projetando=document.getElementById('projection-overlay').classList.contains('show');
+    btFull.classList.toggle('show', projetando && !document.fullscreenElement);
+  };
+  document.addEventListener('fullscreenchange', revisarTelaCheia);
+  btFull.addEventListener('click', ()=>{
+    document.documentElement.requestFullscreen().catch(()=>{});
+    btFull.classList.remove('show');
+  });
   document.getElementById('display-start').classList.add('show');
   document.getElementById('display-start-btn').addEventListener('click', ()=>{
-    document.documentElement.requestFullscreen().catch(()=>{});
+    document.documentElement.requestFullscreen().catch(()=>{}).finally(revisarTelaCheia);
     document.getElementById('display-start').classList.remove('show');
     document.getElementById('projection-overlay').classList.add('show');
+    setTimeout(revisarTelaCheia, 300);
   });
 }
 function applyLiveToPreview(){
@@ -1007,6 +1048,10 @@ function clearCurrentDetail(){
   else if(AppState.view==='sermon'){ AppState.currentSermonId=null; }
   else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
 }
+document.getElementById('mini-live').addEventListener('click',()=>{
+  AppState.mobileActiveTab='right';
+  setMobilePane('right');
+});
 document.querySelectorAll('.bt-item').forEach(btn=>{
   btn.addEventListener('click',()=>{
     if(btn.dataset.pane==='right'){
@@ -2304,11 +2349,11 @@ function renderSermonCenter(container){
     row.draggable=true; row.dataset.idx=idx; row.dataset.itemId=it.id;
     let mini;
     if(it.type==='image' && AppState.sermonSlides[it.slideId]){
-      mini=`<img src="${AppState.sermonSlides[it.slideId]}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;">`;
+      mini=`<img src="${AppState.sermonSlides[it.slideId]}" class="mini-slide">`;
     } else if(it.type==='video' && resolverUrlVideo(it.url)){
-      mini=`<video src="${resolverUrlVideo(it.url)}" muted playsinline preload="metadata" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;pointer-events:none;"></video>`;
+      mini=`<video src="${resolverUrlVideo(it.url)}" muted playsinline preload="metadata" class="mini-slide" style="pointer-events:none;"></video>`;
     } else if(it.type==='video' && it.poster){
-      mini=`<img src="${it.poster}" style="width:56px;height:32px;object-fit:cover;border-radius:4px;flex:none;opacity:.85;">`;
+      mini=`<img src="${it.poster}" class="mini-slide" style="opacity:.85;">`;
     } else {
       mini=`<span class="pl-type" style="flex:none;"><i class="fa-solid ${ICONE_ITEM[it.type]||'fa-circle'}"></i></span>`;
     }
@@ -2604,6 +2649,36 @@ function renderSlideStrip(){
   });
 }
 
+// Faixa do que está no ar, fixa no topo — só aparece no celular, onde o
+// preview grande fica escondido numa aba separada.
+function atualizarMiniLive(imagem, video, texto){
+  const barra=document.getElementById('mini-live');
+  if(!barra) return;
+  const thumb=document.getElementById('mini-live-thumb');
+  const rotulo=document.getElementById('mini-live-text');
+  if(AppState.blackout){
+    thumb.style.backgroundImage='none'; thumb.innerHTML='';
+    rotulo.textContent='Tela apagada';
+  } else if(imagem){
+    thumb.style.backgroundImage=`url("${imagem}")`; thumb.innerHTML='';
+    const it=itemDaPregacaoNoAr();
+    rotulo.textContent = it ? rotuloItemPregacao(it) : 'Imagem na tela';
+  } else if(video){
+    thumb.style.backgroundImage='none';
+    thumb.innerHTML='<i class="fa-solid fa-film" style="color:#fff;font-size:14px;"></i>';
+    const it=itemDaPregacaoNoAr();
+    rotulo.textContent = it ? rotuloItemPregacao(it) : 'Vídeo na tela';
+  } else if(texto){
+    thumb.style.backgroundImage='none';
+    thumb.innerHTML='<span>'+escapeHtml(texto.split('\n').slice(0,3).join(' '))+'</span>';
+    const s=currentSong();
+    rotulo.textContent = s ? `${s.title} — slide ${AppState.currentSlideIndex+1}/${s.slides.length}` : 'Texto na tela';
+  } else {
+    thumb.style.backgroundImage='none'; thumb.innerHTML='';
+    rotulo.textContent='Nada no ar';
+  }
+}
+
 function updatePreview(){
   const theme=getActiveTheme();
   const hide = AppState.blackout || AppState.textHidden;
@@ -2667,6 +2742,7 @@ function updatePreview(){
     el.classList.toggle('no-ar', !!AppState.liveSermonItemId && el.dataset.itemId===AppState.liveSermonItemId);
   });
   renderSlideStrip();
+  atualizarMiniLive(imagemNaTela, videoNaTela, hide ? '' : text);
   const btBlack=document.getElementById('tr-blackout');
   if(btBlack) btBlack.classList.toggle('ligado', !!AppState.blackout);
   const btHide=document.getElementById('tr-hidetext');
@@ -2806,7 +2882,12 @@ function seedDefaultSongs(){
 document.getElementById('open-tv-btn').addEventListener('click',()=>{
   const url = new URL(window.location.href);
   url.searchParams.set('tv','1');
-  window.open(url.toString(), '_blank');
+  // JANELA, não aba: o navegador tira a tela cheia de uma aba assim que você
+  // troca para outra aba da mesma janela — era por isso que a TV caía do
+  // fullscreen toda vez que você mexia no controle. Passar tamanho força janela.
+  const larg=Math.min(1280, screen.availWidth), alt=Math.min(720, screen.availHeight);
+  const janela=window.open(url.toString(), 'holyrics_tv', `width=${larg},height=${alt},menubar=no,toolbar=no`);
+  if(!janela) window.open(url.toString(), '_blank');   // bloqueou pop-up: cai pra aba mesmo
 });
 
 loadState();          // cache local, pra abrir instantâneo mesmo offline
