@@ -295,6 +295,105 @@ body.display-mode #main{ display:none !important; }
 body.display-mode #display-live-dot{display:flex;}
 #display-live-dot span{width:6px;height:6px;border-radius:50%;background:#2ecc71;display:inline-block;}
 
+
+/* =========================================================
+   ÁREA DO APP (membro) — mobile-first, convive com a área de
+   operação sem tocar nela: quem manda é a classe no <body>.
+   ========================================================= */
+:root{
+  --marca:#e8622a;        /* laranja da identidade do Centro Igreja */
+  --marca-suave:#fff1e9;
+  --app-bg:#0f1424;
+  --app-card:#171d33;
+  --app-card-2:#1e2540;
+}
+body.area-app #topbar,
+body.area-app #main,
+body.area-app #bottom-tabs,
+body.area-app #mini-live{ display:none !important; }
+body.area-ops #app-area{ display:none !important; }
+
+#app-area{ display:flex; flex-direction:column; height:100vh; background:var(--app-bg); }
+#app-header{
+  display:flex; align-items:center; gap:10px; padding:14px 16px;
+  background:linear-gradient(135deg,var(--marca),#c9481c); color:#fff; flex:none;
+}
+#app-header .ah-nome{ font-size:17px; font-weight:700; letter-spacing:-.3px; flex:1; }
+#app-header button{ color:#fff; opacity:.85; font-size:15px; padding:6px; }
+#app-body{ flex:1; overflow-y:auto; padding:16px 16px 24px; }
+#app-body.centro{ max-width:720px; margin:0 auto; width:100%; }
+
+#app-tabs{
+  display:flex; background:var(--app-card); border-top:1px solid rgba(255,255,255,.06);
+  flex:none; padding-bottom:env(safe-area-inset-bottom);
+}
+#app-tabs button{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:9px 2px; color:var(--text-dim); font-size:10px;
+}
+#app-tabs button i{ font-size:17px; }
+#app-tabs button.active{ color:var(--marca); }
+
+.card{ background:var(--app-card); border-radius:14px; padding:16px; margin-bottom:12px; }
+.card.destaque{ background:linear-gradient(135deg,var(--marca),#c9481c); color:#fff; }
+.card h3{ font-size:15px; margin-bottom:6px; font-weight:600; }
+.card p{ font-size:13px; color:var(--text-dim); line-height:1.5; }
+.card.destaque p{ color:rgba(255,255,255,.9); }
+.secao-titulo{
+  font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--text-dim);
+  margin:20px 2px 10px; font-weight:600;
+}
+.secao-titulo:first-child{ margin-top:4px; }
+
+.atalhos{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:4px; }
+.atalho{
+  background:var(--app-card); border-radius:14px; padding:14px 8px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; gap:7px; cursor:pointer;
+}
+.atalho i{ font-size:19px; color:var(--marca); }
+.atalho span{ font-size:11px; color:var(--text); line-height:1.2; }
+
+.item-lista{
+  display:flex; gap:12px; align-items:flex-start; background:var(--app-card);
+  border-radius:14px; padding:13px; margin-bottom:10px;
+}
+.item-lista .data-bloco{
+  background:var(--app-card-2); border-radius:10px; padding:8px 10px; text-align:center; flex:none; min-width:52px;
+}
+.item-lista .data-bloco .dia{ font-size:19px; font-weight:700; line-height:1; color:var(--marca); }
+.item-lista .data-bloco .mes{ font-size:9px; text-transform:uppercase; color:var(--text-dim); margin-top:3px; letter-spacing:.5px; }
+.item-lista .corpo{ flex:1; min-width:0; }
+.item-lista .corpo .t{ font-size:14px; font-weight:600; margin-bottom:3px; }
+.item-lista .corpo .s{ font-size:12px; color:var(--text-dim); line-height:1.45; }
+.item-lista img.capa{ width:100%; border-radius:10px; margin-bottom:10px; display:block; }
+.item-lista.coluna{ flex-direction:column; gap:0; }
+
+.chip{
+  display:inline-block; background:var(--app-card-2); color:var(--text-dim);
+  font-size:10px; padding:3px 9px; border-radius:99px; margin-right:5px;
+}
+.btn-app{
+  display:block; width:100%; background:var(--marca); color:#fff; border-radius:12px;
+  padding:13px; font-size:14px; font-weight:600; text-align:center; margin-top:10px;
+}
+.btn-app.secundario{ background:var(--app-card-2); color:var(--text); }
+.vazio{ text-align:center; color:var(--text-dim); font-size:13px; padding:28px 16px; line-height:1.6; }
+.pix-chave{
+  background:var(--app-card-2); border-radius:10px; padding:13px; font-family:ui-monospace,monospace;
+  font-size:13px; word-break:break-all; margin:10px 0; color:var(--text);
+}
+.linha-form{ margin-bottom:10px; }
+.linha-form label{ display:block; font-size:11px; color:var(--text-dim); margin-bottom:5px; }
+.linha-form input,.linha-form textarea,.linha-form select{
+  width:100%; background:var(--app-card-2); border:1px solid transparent; border-radius:10px;
+  padding:11px; color:var(--text); font-size:14px; font-family:inherit;
+}
+.linha-form textarea{ min-height:90px; resize:vertical; }
+@media (min-width:861px){
+  #app-tabs{ justify-content:center; gap:8px; }
+  #app-tabs button{ flex:0 0 120px; }
+}
+
 /* ===== RESPONSIVO / MOBILE ===== */
 #mini-live{display:none;}   /* no computador o preview grande já fica ao lado */
 #bottom-tabs{ display:none; }
@@ -385,11 +484,27 @@ body.display-mode #display-live-dot{display:flex;}
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
     <span id="sync-label">Conectando...</span>
   </span>
+  <button class="topbar-action" id="btn-voltar-app" title="Voltar para o app"><i class="fa-solid fa-arrow-left"></i> App</button>
   <button class="topbar-action" id="open-tv-btn" title="Abre o Modo TV numa janela separada: arraste para o telão e clique em tela cheia"><i class="fa-solid fa-tv"></i> Modo TV</button>
   <button class="topbar-action" id="stage-btn" title="Tela de retorno (Stage View)"><i class="fa-solid fa-tv"></i> Retorno</button>
   <button id="present-btn"><i class="fa-solid fa-play"></i> Projetar</button>
 </div>
 
+<div id="app-area">
+  <header id="app-header">
+    <div class="ah-nome" id="ah-nome">Centro Igreja</div>
+    <button id="btn-modo-equipe" title="Modo equipe: liga a edição do conteúdo"><i class="fa-solid fa-pen-to-square"></i></button>
+    <button id="btn-ir-operacao" title="Área de operação (projeção)"><i class="fa-solid fa-sliders"></i></button>
+  </header>
+  <main id="app-body" class="centro"></main>
+  <nav id="app-tabs">
+    <button class="active" data-app-view="inicio"><i class="fa-solid fa-house"></i><span>Início</span></button>
+    <button data-app-view="agenda"><i class="fa-solid fa-calendar-days"></i><span>Agenda</span></button>
+    <button data-app-view="avisos"><i class="fa-solid fa-bullhorn"></i><span>Avisos</span></button>
+    <button data-app-view="contribuir"><i class="fa-solid fa-hand-holding-heart"></i><span>Contribuir</span></button>
+    <button data-app-view="mais"><i class="fa-solid fa-ellipsis"></i><span>Mais</span></button>
+  </nav>
+</div>
 <div id="mini-live" title="Toque para abrir o Ao Vivo">
   <div id="mini-live-thumb"></div>
   <div id="mini-live-text">Nada no ar</div>
@@ -577,6 +692,11 @@ const metaDocRef = doc(db,'holyrics_data','meta');
 const liveDocRef = doc(db,'holyrics_data','live');
 const sermonsCollRef = collection(db,'holyrics_sermons');
 const sermonSlidesCollRef = collection(db,'holyrics_sermon_slides');
+const eventsCollRef      = collection(db,'holyrics_events');
+const newsCollRef        = collection(db,'holyrics_news');
+const prayersCollRef     = collection(db,'holyrics_prayers');
+const devotionalsCollRef = collection(db,'holyrics_devotionals');
+const churchDocRef       = doc(db,'holyrics_data','church');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -759,7 +879,7 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap, evSnap, newsSnap, praySnap, devSnap, churchSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef), getDocs(eventsCollRef), getDocs(newsCollRef), getDocs(prayersCollRef), getDocs(devotionalsCollRef), getDoc(churchDocRef)]);
     if(!songsSnap.empty) AppState.songs = songsSnap.docs.map(d=>d.data());
     if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
     if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
@@ -767,6 +887,12 @@ async function initCloudSync(){
     if(plSnap.exists() && Array.isArray(plSnap.data().list)) AppState.playlists = plSnap.data().list;
     if(!mediaSnap.empty) AppState.media = mediaSnap.docs.map(d=>d.data());
     AppState.sermons = sermonsSnap.docs.map(d=>d.data());
+    AppState.events      = evSnap.docs.map(d=>d.data());
+    AppState.news        = newsSnap.docs.map(d=>d.data());
+    AppState.prayers     = praySnap.docs.map(d=>d.data());
+    AppState.devotionals = devSnap.docs.map(d=>d.data());
+    if(churchSnap.exists()) AppState.church = Object.assign(AppState.church, churchSnap.data());
+    if(AppState.area==='app') renderAppView();
     seedDefaultSongs();
     renderView(); renderMediaPanel();
     // adota o que já está na tela antes de liberar a publicação: abrir o app
@@ -822,6 +948,20 @@ async function initCloudSync(){
     if(d.origem===CLIENT_ID) return;   // é o eco do que eu mesmo escrevi
     aplicarEstadoLive(d);
   });
+  // conteúdo do app: chega em tempo real em todo mundo
+  [[eventsCollRef,'events'],[newsCollRef,'news'],[prayersCollRef,'prayers'],[devotionalsCollRef,'devotionals']].forEach(([ref,campo])=>{
+    onSnapshot(ref, {includeMetadataChanges:true}, snap=>{
+      if(snap.metadata.hasPendingWrites) return;
+      AppState[campo]=snap.docs.map(d=>d.data());
+      if(AppState.area==='app') renderAppView();
+    });
+  });
+  onSnapshot(churchDocRef, snap=>{
+    if(snap.exists()){
+      AppState.church=Object.assign(AppState.church, snap.data());
+      if(AppState.area==='app') renderAppView();
+    }
+  });
 }
 
 /* =========================================================
@@ -847,6 +987,12 @@ const AppState = {
   liveSermonItemId: null, // qual item da pregação está na tela
   sermonImage: null,      // dataUrl da imagem no ar, se houver
   sermonVideo: null,      // url do vídeo da pregação no ar, se houver
+  // ----- área do app (membro) -----
+  area: 'app',            // 'app' = experiência do membro, 'operacao' = projeção
+  appView: 'inicio',
+  modoEquipe: false,      // revela os botões de editar conteúdo
+  events: [], news: [], prayers: [], devotionals: [],
+  church: {name:'Centro Igreja', about:'', pixKey:'', pixName:'', bank:'', address:'', liveUrl:''},
   mobileActiveTab: 'bible',
 };
 
@@ -2462,6 +2608,409 @@ function rotuloItemPregacao(it){
 }
 const ICONE_ITEM={image:'fa-image', video:'fa-film', text:'fa-align-left', song:'fa-music', bible:'fa-book-bible'};
 
+
+/* =========================================================
+   APP DA IGREJA — conteúdo para o membro
+   A projeção continua exatamente como estava, numa área
+   própria; aqui vive o que o membro consome no celular.
+   Cada tipo é uma coleção própria no Firestore, pelo mesmo
+   motivo das músicas: documento tem limite de 1MB.
+   ========================================================= */
+function salvarDoc(coll, item, nome){
+  updateSyncStatus('saving');
+  return setDoc(doc(coll, item.id), sanitizeForFirestore(item))
+    .then(()=>updateSyncStatus('synced'))
+    .catch(err=>{ console.error('Erro salvando '+nome+':', err); updateSyncStatus('error'); toast('Não consegui salvar '+nome+'.'); });
+}
+function apagarDoc(coll, id){ return deleteDoc(doc(coll,id)).catch(()=>{}); }
+
+function salvarIgreja(){
+  updateSyncStatus('saving');
+  setDoc(churchDocRef, sanitizeForFirestore(AppState.church))
+    .then(()=>updateSyncStatus('synced')).catch(()=>updateSyncStatus('error'));
+}
+
+/* ---------- utilidades de data ---------- */
+const MESES=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const DIAS=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+function dataDoEvento(ev){
+  // 'AAAA-MM-DD' + 'HH:MM' sem fuso, pra não escorregar um dia
+  const [a,m,d]=String(ev.date||'').split('-').map(Number);
+  const [h,min]=String(ev.time||'00:00').split(':').map(Number);
+  if(!a||!m||!d) return null;
+  return new Date(a, m-1, d, h||0, min||0);
+}
+function eventosFuturos(){
+  const agora=new Date(); agora.setHours(0,0,0,0);
+  return AppState.events
+    .map(e=>({ev:e, quando:dataDoEvento(e)}))
+    .filter(x=>x.quando && x.quando>=agora)
+    .sort((a,b)=>a.quando-b.quando);
+}
+function rotuloQuando(dt){
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const alvo=new Date(dt); alvo.setHours(0,0,0,0);
+  const dias=Math.round((alvo-hoje)/86400000);
+  const hora=String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
+  if(dias===0) return 'Hoje às '+hora;
+  if(dias===1) return 'Amanhã às '+hora;
+  if(dias<7) return DIAS[dt.getDay()]+' às '+hora;
+  return `${dt.getDate()} de ${MESES[dt.getMonth()]} às ${hora}`;
+}
+
+/* ---------- navegação entre as duas áreas ---------- */
+function aplicarArea(){
+  document.body.classList.toggle('area-app', AppState.area==='app');
+  document.body.classList.toggle('area-ops', AppState.area==='operacao');
+  localStorage.setItem('holyrics_area', AppState.area);
+  if(AppState.area==='app') renderAppView(); else renderView();
+}
+function irParaArea(area){ AppState.area=area; aplicarArea(); }
+function abrirAppView(v){
+  AppState.appView=v;
+  document.querySelectorAll('#app-tabs button').forEach(b=>b.classList.toggle('active', b.dataset.appView===v));
+  renderAppView();
+}
+
+/* ---------- renderização ---------- */
+function renderAppView(){
+  const corpo=document.getElementById('app-body');
+  if(!corpo) return;
+  document.getElementById('ah-nome').textContent=AppState.church.name||'Minha Igreja';
+  corpo.innerHTML='';
+  const v=AppState.appView;
+  if(v==='inicio') telaInicio(corpo);
+  else if(v==='agenda') telaAgenda(corpo);
+  else if(v==='avisos') telaAvisos(corpo);
+  else if(v==='contribuir') telaContribuir(corpo);
+  else if(v==='mais') telaMais(corpo);
+  else if(v==='oracao') telaOracao(corpo);
+  else if(v==='devocional') telaDevocional(corpo);
+  else if(v==='sobre') telaSobre(corpo);
+  corpo.scrollTop=0;
+}
+function botaoEquipe(rotulo, aoClicar){
+  if(!AppState.modoEquipe) return null;
+  const b=document.createElement('button');
+  b.className='btn-app secundario';
+  b.innerHTML='<i class="fa-solid fa-plus"></i> '+rotulo;
+  b.addEventListener('click', aoClicar);
+  return b;
+}
+function voltarPara(corpo, view, rotulo){
+  const b=document.createElement('button');
+  b.className='btn-app secundario';
+  b.style.marginBottom='14px'; b.style.marginTop='0';
+  b.innerHTML='<i class="fa-solid fa-arrow-left"></i> '+rotulo;
+  b.addEventListener('click',()=>abrirAppView(view));
+  corpo.appendChild(b);
+}
+
+function telaInicio(corpo){
+  const prox=eventosFuturos()[0];
+  const hero=document.createElement('div');
+  hero.className='card destaque';
+  hero.innerHTML = prox
+    ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85;margin-bottom:6px;">Próximo encontro</div>
+       <h3 style="font-size:19px;">${escapeHtml(prox.ev.title||'')}</h3>
+       <p>${escapeHtml(rotuloQuando(prox.quando))}${prox.ev.place?' · '+escapeHtml(prox.ev.place):''}</p>`
+    : `<h3 style="font-size:19px;">${escapeHtml(AppState.church.name||'Bem-vindo')}</h3>
+       <p>Nenhum encontro marcado ainda.</p>`;
+  corpo.appendChild(hero);
+
+  const atalhos=document.createElement('div');
+  atalhos.className='atalhos';
+  [['contribuir','fa-hand-holding-heart','Contribuir'],
+   ['oracao','fa-hands-praying','Oração'],
+   ['devocional','fa-book-open','Devocional']].forEach(([view,icone,rot])=>{
+    const a=document.createElement('div');
+    a.className='atalho';
+    a.innerHTML=`<i class="fa-solid ${icone}"></i><span>${rot}</span>`;
+    a.addEventListener('click',()=>abrirAppView(view));
+    atalhos.appendChild(a);
+  });
+  corpo.appendChild(atalhos);
+
+  const dev=AppState.devotionals.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+  if(dev){
+    const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Devocional'; corpo.appendChild(t);
+    const c=document.createElement('div'); c.className='card';
+    c.innerHTML=`<h3>${escapeHtml(dev.verseRef||'Palavra de hoje')}</h3><p>${escapeHtml((dev.verseText||dev.body||'').slice(0,180))}${(dev.verseText||dev.body||'').length>180?'…':''}</p>`;
+    c.style.cursor='pointer';
+    c.addEventListener('click',()=>abrirAppView('devocional'));
+    corpo.appendChild(c);
+  }
+
+  const recentes=AppState.news.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,3);
+  if(recentes.length){
+    const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Últimos avisos'; corpo.appendChild(t);
+    recentes.forEach(n=>corpo.appendChild(cartaoAviso(n,true)));
+  }
+  const proximos=eventosFuturos().slice(1,4);
+  if(proximos.length){
+    const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Também vem aí'; corpo.appendChild(t);
+    proximos.forEach(x=>corpo.appendChild(cartaoEvento(x.ev,x.quando)));
+  }
+}
+
+function cartaoEvento(ev, quando){
+  const el=document.createElement('div');
+  el.className='item-lista';
+  el.innerHTML=`<div class="data-bloco"><div class="dia">${quando.getDate()}</div><div class="mes">${MESES[quando.getMonth()]}</div></div>
+    <div class="corpo">
+      <div class="t">${escapeHtml(ev.title||'')}</div>
+      <div class="s">${escapeHtml(rotuloQuando(quando))}${ev.place?' · '+escapeHtml(ev.place):''}</div>
+      ${ev.description?`<div class="s" style="margin-top:5px;">${escapeHtml(ev.description)}</div>`:''}
+    </div>`;
+  if(AppState.modoEquipe){
+    const x=document.createElement('button');
+    x.innerHTML='<i class="fa-solid fa-xmark"></i>';
+    x.style.cssText='color:var(--text-dim);padding:4px;flex:none;';
+    x.addEventListener('click',()=>{
+      if(!confirm('Remover "'+(ev.title||'')+'" da agenda?')) return;
+      apagarDoc(eventsCollRef, ev.id);
+      AppState.events=AppState.events.filter(e=>e.id!==ev.id);
+      renderAppView();
+    });
+    el.appendChild(x);
+  }
+  return el;
+}
+
+function cartaoAviso(n, compacto){
+  const el=document.createElement('div');
+  el.className='item-lista coluna';
+  const arte=n.imageUrl ? `<img class="capa" src="${n.imageUrl}" alt="">` : '';
+  el.innerHTML=`${compacto?'':arte}
+    <div class="corpo" style="width:100%;">
+      <div class="t">${escapeHtml(n.title||'')}</div>
+      <div class="s" style="margin-top:4px;">${escapeHtml(compacto ? (n.body||'').slice(0,120)+((n.body||'').length>120?'…':'') : (n.body||''))}</div>
+    </div>`;
+  if(AppState.modoEquipe){
+    const x=document.createElement('button');
+    x.innerHTML='<i class="fa-solid fa-xmark"></i> remover';
+    x.style.cssText='color:var(--text-dim);font-size:11px;padding:6px 0 0;align-self:flex-start;';
+    x.addEventListener('click',()=>{
+      if(!confirm('Remover este aviso?')) return;
+      apagarDoc(newsCollRef, n.id);
+      AppState.news=AppState.news.filter(x2=>x2.id!==n.id);
+      renderAppView();
+    });
+    el.appendChild(x);
+  }
+  return el;
+}
+
+function telaAgenda(corpo){
+  const novo=botaoEquipe('Novo evento', ()=>{
+    const title=prompt('Nome do evento:',''); if(!title) return;
+    const date=prompt('Data (AAAA-MM-DD):', new Date().toISOString().slice(0,10)); if(!date) return;
+    const time=prompt('Horário (HH:MM):','19:00')||'19:00';
+    const place=prompt('Local (opcional):','')||'';
+    const description=prompt('Descrição (opcional):','')||'';
+    const ev={id:uid(), title, date, time, place, description, createdAt:Date.now()};
+    AppState.events.push(ev); salvarDoc(eventsCollRef, ev, 'o evento'); renderAppView();
+  });
+  if(novo) corpo.appendChild(novo);
+  const lista=eventosFuturos();
+  if(!lista.length){ corpo.innerHTML+='<div class="vazio">Nenhum encontro marcado.<br>Cultos, ensaios e eventos aparecem aqui.</div>'; return; }
+  const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Próximos'; corpo.appendChild(t);
+  lista.forEach(x=>corpo.appendChild(cartaoEvento(x.ev,x.quando)));
+}
+
+function telaAvisos(corpo){
+  const novo=botaoEquipe('Novo aviso', ()=>{
+    const title=prompt('Título do aviso:',''); if(!title) return;
+    const body=prompt('Texto:','')||'';
+    const n={id:uid(), title, body, imageUrl:'', createdAt:Date.now()};
+    AppState.news.unshift(n); salvarDoc(newsCollRef, n, 'o aviso'); renderAppView();
+  });
+  if(novo) corpo.appendChild(novo);
+  const lista=AppState.news.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(!lista.length){ corpo.innerHTML+='<div class="vazio">Nenhum aviso publicado ainda.</div>'; return; }
+  lista.forEach(n=>corpo.appendChild(cartaoAviso(n,false)));
+}
+
+function telaContribuir(corpo){
+  const ig=AppState.church;
+  const c=document.createElement('div');
+  c.className='card destaque';
+  c.innerHTML=`<h3 style="font-size:18px;">Dízimos e ofertas</h3>
+    <p>"Cada um dê conforme determinou em seu coração, não com pesar ou por obrigação, pois Deus ama quem dá com alegria." — 2 Coríntios 9:7</p>`;
+  corpo.appendChild(c);
+
+  if(ig.pixKey){
+    const box=document.createElement('div');
+    box.className='card';
+    box.innerHTML=`<h3>Chave PIX</h3>
+      <div class="pix-chave" id="pix-chave">${escapeHtml(ig.pixKey)}</div>
+      ${ig.pixName?`<p>${escapeHtml(ig.pixName)}</p>`:''}`;
+    const b=document.createElement('button');
+    b.className='btn-app';
+    b.innerHTML='<i class="fa-regular fa-copy"></i> Copiar chave';
+    b.addEventListener('click',async()=>{
+      try{ await navigator.clipboard.writeText(ig.pixKey); toast('Chave PIX copiada'); }
+      catch(e){ toast('Copie manualmente: '+ig.pixKey); }
+    });
+    box.appendChild(b);
+    corpo.appendChild(box);
+  } else {
+    corpo.innerHTML+='<div class="vazio">A chave PIX ainda não foi cadastrada.<br>Ligue o modo equipe no ícone do lápis para cadastrar.</div>';
+  }
+  if(ig.bank){
+    const bk=document.createElement('div'); bk.className='card';
+    bk.innerHTML=`<h3>Transferência bancária</h3><p style="white-space:pre-wrap;">${escapeHtml(ig.bank)}</p>`;
+    corpo.appendChild(bk);
+  }
+  const arteQR=AppState.media.find(m=>m.type!=='video' && /qr|pix|dizimo|dízimo|generosidade/i.test(m.name||''));
+  if(arteQR && arteQR.dataUrl){
+    const q=document.createElement('div'); q.className='card';
+    q.innerHTML=`<h3>QR Code</h3><img src="${arteQR.dataUrl}" style="width:100%;border-radius:10px;margin-top:8px;">`;
+    corpo.appendChild(q);
+  }
+  const edit=botaoEquipe('Editar dados de contribuição', ()=>{
+    ig.pixKey=prompt('Chave PIX:', ig.pixKey||'')||'';
+    ig.pixName=prompt('Nome do recebedor:', ig.pixName||'')||'';
+    ig.bank=prompt('Dados bancários (opcional):', ig.bank||'')||'';
+    salvarIgreja(); renderAppView();
+  });
+  if(edit) corpo.appendChild(edit);
+}
+
+function telaOracao(corpo){
+  voltarPara(corpo,'mais','Voltar');
+  const form=document.createElement('div');
+  form.className='card';
+  form.innerHTML=`<h3>Enviar um pedido</h3>
+    <div class="linha-form" style="margin-top:10px;"><label>Seu nome (pode deixar em branco)</label><input id="or-nome" placeholder="Anônimo"></div>
+    <div class="linha-form"><label>Pedido</label><textarea id="or-texto" placeholder="Escreva aqui seu pedido de oração"></textarea></div>`;
+  const b=document.createElement('button');
+  b.className='btn-app'; b.textContent='Enviar pedido';
+  b.addEventListener('click',()=>{
+    const texto=form.querySelector('#or-texto').value.trim();
+    if(!texto){ toast('Escreva o pedido antes de enviar.'); return; }
+    const pedido={id:uid(), name:(form.querySelector('#or-nome').value.trim()||'Anônimo'), request:texto, prayCount:0, createdAt:Date.now()};
+    AppState.prayers.unshift(pedido);
+    salvarDoc(prayersCollRef, pedido, 'o pedido');
+    toast('Pedido enviado. Estaremos orando.');
+    renderAppView();
+  });
+  form.appendChild(b);
+  corpo.appendChild(form);
+
+  const lista=AppState.prayers.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Mural de oração'; corpo.appendChild(t);
+  if(!lista.length){ corpo.innerHTML+='<div class="vazio">Nenhum pedido ainda.</div>'; return; }
+  lista.forEach(pd=>{
+    const el=document.createElement('div');
+    el.className='item-lista coluna';
+    el.innerHTML=`<div class="corpo" style="width:100%;">
+        <div class="t">${escapeHtml(pd.name||'Anônimo')}</div>
+        <div class="s" style="margin-top:4px;white-space:pre-wrap;">${escapeHtml(pd.request||'')}</div>
+      </div>`;
+    const acoes=document.createElement('div');
+    acoes.style.cssText='display:flex;gap:14px;align-items:center;margin-top:9px;width:100%;';
+    const orar=document.createElement('button');
+    orar.style.cssText='color:var(--marca);font-size:12px;font-weight:600;';
+    orar.innerHTML=`<i class="fa-solid fa-hands-praying"></i> Orei por isso (${pd.prayCount||0})`;
+    orar.addEventListener('click',()=>{
+      pd.prayCount=(pd.prayCount||0)+1;
+      salvarDoc(prayersCollRef, pd, 'o pedido');
+      orar.innerHTML=`<i class="fa-solid fa-hands-praying"></i> Orei por isso (${pd.prayCount})`;
+    });
+    acoes.appendChild(orar);
+    if(AppState.modoEquipe){
+      const x=document.createElement('button');
+      x.style.cssText='color:var(--text-dim);font-size:11px;';
+      x.textContent='remover';
+      x.addEventListener('click',()=>{
+        if(!confirm('Remover este pedido do mural?')) return;
+        apagarDoc(prayersCollRef, pd.id);
+        AppState.prayers=AppState.prayers.filter(o=>o.id!==pd.id);
+        renderAppView();
+      });
+      acoes.appendChild(x);
+    }
+    el.appendChild(acoes);
+    corpo.appendChild(el);
+  });
+}
+
+function telaDevocional(corpo){
+  voltarPara(corpo,'mais','Voltar');
+  const novo=botaoEquipe('Novo devocional', ()=>{
+    const date=prompt('Data (AAAA-MM-DD):', new Date().toISOString().slice(0,10)); if(!date) return;
+    const verseRef=prompt('Referência (ex.: Mateus 6:33):','')||'';
+    const verseText=prompt('Texto do versículo:','')||'';
+    const body=prompt('Reflexão (opcional):','')||'';
+    const d={id:uid(), date, verseRef, verseText, body, createdAt:Date.now()};
+    AppState.devotionals.unshift(d); salvarDoc(devotionalsCollRef, d, 'o devocional'); renderAppView();
+  });
+  if(novo) corpo.appendChild(novo);
+  const lista=AppState.devotionals.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  if(!lista.length){ corpo.innerHTML+='<div class="vazio">Nenhum devocional publicado.</div>'; return; }
+  lista.forEach(d=>{
+    const el=document.createElement('div');
+    el.className='card';
+    el.innerHTML=`<span class="chip">${escapeHtml(d.date||'')}</span>
+      <h3 style="margin-top:9px;">${escapeHtml(d.verseRef||'')}</h3>
+      <p style="font-style:italic;margin-bottom:8px;">${escapeHtml(d.verseText||'')}</p>
+      ${d.body?`<p style="white-space:pre-wrap;">${escapeHtml(d.body)}</p>`:''}`;
+    if(AppState.modoEquipe){
+      const x=document.createElement('button');
+      x.style.cssText='color:var(--text-dim);font-size:11px;margin-top:8px;';
+      x.textContent='remover';
+      x.addEventListener('click',()=>{
+        if(!confirm('Remover este devocional?')) return;
+        apagarDoc(devotionalsCollRef, d.id);
+        AppState.devotionals=AppState.devotionals.filter(o=>o.id!==d.id);
+        renderAppView();
+      });
+      el.appendChild(x);
+    }
+    corpo.appendChild(el);
+  });
+}
+
+function telaSobre(corpo){
+  voltarPara(corpo,'mais','Voltar');
+  const ig=AppState.church;
+  const c=document.createElement('div'); c.className='card';
+  c.innerHTML=`<h3 style="font-size:18px;">${escapeHtml(ig.name||'')}</h3>
+    ${ig.about?`<p style="white-space:pre-wrap;margin-top:8px;">${escapeHtml(ig.about)}</p>`:'<p>Nenhuma descrição cadastrada.</p>'}
+    ${ig.address?`<p style="margin-top:12px;"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(ig.address)}</p>`:''}`;
+  corpo.appendChild(c);
+  const edit=botaoEquipe('Editar dados da igreja', ()=>{
+    ig.name=prompt('Nome da igreja:', ig.name||'')||ig.name;
+    ig.about=prompt('Sobre a igreja:', ig.about||'')||'';
+    ig.address=prompt('Endereço:', ig.address||'')||'';
+    salvarIgreja(); renderAppView();
+  });
+  if(edit) corpo.appendChild(edit);
+}
+
+function telaMais(corpo){
+  [['oracao','fa-hands-praying','Mural de oração','Envie e acompanhe pedidos'],
+   ['devocional','fa-book-open','Devocional','Palavra e reflexão do dia'],
+   ['sobre','fa-circle-info','Sobre a igreja','Endereço e informações']].forEach(([view,icone,tit,sub])=>{
+    const el=document.createElement('div');
+    el.className='item-lista'; el.style.cursor='pointer';
+    el.innerHTML=`<div class="data-bloco" style="min-width:44px;padding:11px;"><i class="fa-solid ${icone}" style="color:var(--marca);font-size:16px;"></i></div>
+      <div class="corpo"><div class="t">${tit}</div><div class="s">${sub}</div></div>
+      <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;align-self:center;"></i>`;
+    el.addEventListener('click',()=>abrirAppView(view));
+    corpo.appendChild(el);
+  });
+  const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Equipe'; corpo.appendChild(t);
+  const ops=document.createElement('div');
+  ops.className='item-lista'; ops.style.cursor='pointer';
+  ops.innerHTML=`<div class="data-bloco" style="min-width:44px;padding:11px;"><i class="fa-solid fa-sliders" style="color:var(--marca);font-size:16px;"></i></div>
+    <div class="corpo"><div class="t">Área de operação</div><div class="s">Projeção, músicas, Bíblia, pregação</div></div>
+    <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;align-self:center;"></i>`;
+  ops.addEventListener('click',()=>irParaArea('operacao'));
+  corpo.appendChild(ops);
+}
+
 /* =========================================================
    PREVIEW / PROJECTION / STAGE
    ========================================================= */
@@ -2890,8 +3439,26 @@ document.getElementById('open-tv-btn').addEventListener('click',()=>{
   if(!janela) window.open(url.toString(), '_blank');   // bloqueou pop-up: cai pra aba mesmo
 });
 
+document.querySelectorAll('#app-tabs button').forEach(b=>{
+  b.addEventListener('click',()=>abrirAppView(b.dataset.appView));
+});
+document.getElementById('btn-ir-operacao').addEventListener('click',()=>irParaArea('operacao'));
+document.getElementById('btn-voltar-app').addEventListener('click',()=>irParaArea('app'));
+document.getElementById('btn-modo-equipe').addEventListener('click',()=>{
+  AppState.modoEquipe=!AppState.modoEquipe;
+  localStorage.setItem('holyrics_modo_equipe', AppState.modoEquipe?'1':'');
+  document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ? '1' : '.55';
+  toast(AppState.modoEquipe ? 'Modo equipe ligado: dá pra editar o conteúdo' : 'Modo equipe desligado');
+  renderAppView();
+});
+document.getElementById('btn-modo-equipe').style.opacity='.55';
+
 loadState();          // cache local, pra abrir instantâneo mesmo offline
+AppState.modoEquipe = localStorage.getItem('holyrics_modo_equipe')==='1';
+document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ? '1' : '.55';
+AppState.area = isTvMode ? 'operacao' : (localStorage.getItem('holyrics_area') || 'app');
 if(isTvMode){
+  document.body.classList.add('area-ops');
   initTvMode();       // PC do telão: só escuta e projeta
 } else {
   // seedDefaultSongs() NÃO roda aqui: neste ponto o AppState só tem o cache
@@ -2900,6 +3467,7 @@ if(isTvMode){
   renderView();
   renderMediaPanel();
   updatePreview();
+  aplicarArea();      // 'app' pro membro, 'operacao' pra equipe
   initCloudSync();    // celular/computador de operação: edita e controla
 }
 </script>
