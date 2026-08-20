@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Regras do app da igreja.
+// Ideia central: conteúdo publicado (agenda, avisos, devocional, jornada,
+// músicas, temas) qualquer pessoa logada LÊ, mas só a equipe ESCREVE.
+// Cada um mexe apenas no próprio perfil. Pedido de oração qualquer membro
+// cria, e só a equipe apaga.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado()  { return request.auth != null; }
+    function meuPerfil(){ return get(/databases/$(database)/documents/holyrics_members/$(request.auth.uid)); }
+    function equipe()  { return logado() && meuPerfil().data.role == 'equipe'; }
+
+    // Perfil: cada pessoa lê e escreve só o seu. A equipe enxerga todos
+    // (é o que permite acompanhar a jornada de cada um).
+    match /holyrics_members/{uid} {
+      allow read:   if logado() && (request.auth.uid == uid || equipe());
+      allow create: if logado() && request.auth.uid == uid;
+      // ninguém se promove sozinho: mudar o próprio papel só sendo equipe
+      allow update: if logado() && (
+                      (request.auth.uid == uid && request.resource.data.role == resource.data.role)
+                      || equipe());
+      allow delete: if equipe();
+    }
+
+    // Conteúdo publicado pela igreja
+    match /holyrics_events/{id}      { allow read: if logado(); allow write: if equipe(); }
+    match /holyrics_news/{id}        { allow read: if logado(); allow write: if equipe(); }
+    match /holyrics_devotionals/{id} { allow read: if logado(); allow write: if equipe(); }
+    match /holyrics_journey/{id}     { allow read: if logado(); allow write: if equipe(); }
+
+    // Mural de oração: qualquer membro publica; editar e apagar, só a equipe
+    // (o contador de "orei por isso" é update, por isso ele fica liberado)
+    match /holyrics_prayers/{id} {
+      allow read:   if logado();
+      allow create: if logado();
+      allow update: if logado();
+      allow delete: if equipe();
+    }
+
+    // Operação do culto: quem projeta precisa escrever, e o Modo TV lê sem
+    // conta nenhuma (é um computador ligado no telão, não uma pessoa).
+    match /holyrics_songs/{id}         { allow read: if true; allow write: if equipe(); }
+    match /holyrics_themes/{id}        { allow read: if true; allow write: if equipe(); }
+    match /holyrics_media/{id}         { allow read: if true; allow write: if equipe(); }
+    match /holyrics_sermons/{id}       { allow read: if true; allow write: if equipe(); }
+    match /holyrics_sermon_slides/{id} { allow read: if true; allow write: if equipe(); }
+    match /holyrics_data/{id}          { allow read: if true; allow write: if equipe(); }
+  }
+}

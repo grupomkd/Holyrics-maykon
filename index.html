@@ -395,6 +395,24 @@ body.area-ops #app-area{ display:none !important; }
 }
 
 
+
+/* ---- login e cadastro ---- */
+#login-tela{ padding:8px 0 24px; }
+#login-tela .marca-topo{ text-align:center; margin:12px 0 26px; }
+#login-tela .marca-topo .nome{ font-size:23px; font-weight:700; letter-spacing:-.5px; }
+#login-tela .marca-topo .sub{ font-size:13px; color:var(--text-dim); margin-top:5px; }
+.alternar-login{ text-align:center; margin-top:16px; font-size:13px; color:var(--text-dim); }
+.alternar-login button{ color:var(--marca); font-weight:600; }
+.aviso-erro{
+  background:rgba(233,69,96,.12); border:1px solid rgba(233,69,96,.3); color:#ff92a4;
+  border-radius:10px; padding:11px; font-size:12.5px; line-height:1.5; margin-bottom:12px;
+}
+.perfil-cabecalho{ display:flex; align-items:center; gap:13px; margin-bottom:6px; }
+.perfil-avatar{
+  width:50px; height:50px; border-radius:50%; background:var(--marca); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:19px; font-weight:700; flex:none;
+}
+
 /* ---- jornada de crescimento (trilha de discipulado) ---- */
 .jornada-barra{ height:7px; background:var(--app-card-2); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
 .jornada-barra i{ display:block; height:100%; background:var(--marca); border-radius:99px; transition:width .35s ease; }
@@ -639,6 +657,7 @@ body.area-ops #app-area{ display:none !important; }
    ========================================================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDut6pM1ajgL8n-zjQCgEdqzLsj2IKgKtI",
@@ -726,6 +745,8 @@ const prayersCollRef     = collection(db,'holyrics_prayers');
 const devotionalsCollRef = collection(db,'holyrics_devotionals');
 const churchDocRef       = doc(db,'holyrics_data','church');
 const journeyCollRef     = collection(db,'holyrics_journey');
+const membersCollRef     = collection(db,'holyrics_members');
+const auth = getAuth(fbApp);
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -1025,6 +1046,10 @@ const AppState = {
   journey: [],            // etapas da jornada de crescimento
   journeyProgress: {},    // o que ESTE aparelho já concluiu (sem login, é local)
   journeyStepId: null,
+  user: null,             // conta autenticada (Firebase Auth)
+  member: null,           // perfil da pessoa nesta igreja
+  authPronto: false,      // já sabemos se tem alguém logado?
+  authErro: '',           // 'desligado' quando o Auth não foi ativado no console
   church: {name:'Centro Igreja', about:'', pixKey:'', pixName:'', bank:'', address:'', liveUrl:''},
   mobileActiveTab: 'bible',
 };
@@ -2711,6 +2736,26 @@ function renderAppView(){
   if(!corpo) return;
   document.getElementById('ah-nome').textContent=AppState.church.name||'Minha Igreja';
   corpo.innerHTML='';
+
+  // porteiro: enquanto não sabemos quem é, nada de conteúdo
+  const abas=document.getElementById('app-tabs');
+  const lapis=document.getElementById('btn-modo-equipe');
+  if(!AppState.authPronto){
+    abas.style.display='none';
+    corpo.innerHTML='<div class="vazio">Carregando…</div>';
+    return;
+  }
+  if(!AppState.user){
+    abas.style.display='none'; lapis.style.display='none';
+    telaLogin(corpo); return;
+  }
+  if(!AppState.member){
+    abas.style.display='none'; lapis.style.display='none';
+    telaCompletarCadastro(corpo); return;
+  }
+  abas.style.display='';
+  lapis.style.display = ehEquipe() ? '' : 'none';
+
   const v=AppState.appView;
   if(v==='inicio') telaInicio(corpo);
   else if(v==='agenda') telaAgenda(corpo);
@@ -2722,10 +2767,11 @@ function renderAppView(){
   else if(v==='oracao') telaOracao(corpo);
   else if(v==='devocional') telaDevocional(corpo);
   else if(v==='sobre') telaSobre(corpo);
+  else if(v==='perfil') telaPerfil(corpo);
   corpo.scrollTop=0;
 }
 function botaoEquipe(rotulo, aoClicar){
-  if(!AppState.modoEquipe) return null;
+  if(!AppState.modoEquipe || !ehEquipe()) return null;
   const b=document.createElement('button');
   b.className='btn-app secundario';
   b.innerHTML='<i class="fa-solid fa-plus"></i> '+rotulo;
@@ -2741,6 +2787,291 @@ function voltarPara(corpo, view, rotulo){
   corpo.appendChild(b);
 }
 
+
+
+/* =========================================================
+   CONTA DA PESSOA
+   Conta (e-mail e senha) fica no Firebase Auth; o perfil na
+   igreja fica em holyrics_members/{uid}. São coisas separadas
+   de propósito: a conta é da pessoa, o perfil é o vínculo dela
+   com esta igreja.
+   ========================================================= */
+const ERROS_AUTH={
+  'auth/invalid-email':'Esse e-mail não parece válido.',
+  'auth/user-not-found':'Não achei uma conta com esse e-mail.',
+  'auth/wrong-password':'Senha incorreta.',
+  'auth/invalid-credential':'E-mail ou senha incorretos.',
+  'auth/email-already-in-use':'Já existe uma conta com esse e-mail. Tente entrar.',
+  'auth/weak-password':'A senha precisa ter pelo menos 6 caracteres.',
+  'auth/too-many-requests':'Muitas tentativas seguidas. Espere um pouco.',
+  'auth/network-request-failed':'Sem conexão com a internet.',
+  'auth/configuration-not-found':'O login ainda não foi ativado no Firebase deste projeto.',
+  'auth/operation-not-allowed':'O login por e-mail e senha não está ativado no Firebase.',
+};
+function mensagemAuth(err){
+  const cod=(err&&err.code)||'';
+  return ERROS_AUTH[cod] || ('Não consegui concluir ('+(cod||err&&err.message||'erro')+').');
+}
+function authDesligado(err){
+  const c=(err&&err.code)||'';
+  return c==='auth/configuration-not-found' || c==='auth/operation-not-allowed';
+}
+
+async function carregarPerfil(uid){
+  try{
+    const s=await getDoc(doc(membersCollRef, uid));
+    return s.exists() ? s.data() : null;
+  }catch(e){ console.error('perfil:', e); return null; }
+}
+function salvarPerfil(m){
+  return setDoc(doc(membersCollRef, m.uid), sanitizeForFirestore(m));
+}
+function ehEquipe(){ return !!(AppState.member && AppState.member.role==='equipe'); }
+function primeiroNome(){
+  const n=(AppState.member&&AppState.member.name)||'';
+  return n.split(' ')[0]||'';
+}
+function iniciais(){
+  const n=((AppState.member&&AppState.member.name)||'?').trim().split(/\s+/);
+  return ((n[0]||'?')[0]+(n.length>1?n[n.length-1][0]:'')).toUpperCase();
+}
+
+/* O progresso da jornada nasceu no aparelho; quando a pessoa entra numa
+   conta ele passa a ser dela, e o que já estava marcado aqui é levado junto. */
+async function sincronizarJornadaDoPerfil(){
+  if(!AppState.member) return;
+  const local=AppState.journeyProgress||{};
+  const doPerfil=AppState.member.journeyProgress||{};
+  const juntos=Object.assign({}, doPerfil, local);
+  AppState.journeyProgress=juntos;
+  salvarProgressoJornada();
+  if(JSON.stringify(doPerfil)!==JSON.stringify(juntos)){
+    AppState.member.journeyProgress=juntos;
+    await salvarPerfil(AppState.member).catch(()=>{});
+  }
+}
+function guardarProgressoNaConta(){
+  if(!AppState.member) return;
+  AppState.member.journeyProgress=AppState.journeyProgress;
+  salvarPerfil(AppState.member).catch(()=>{});
+}
+
+function iniciarAuth(){
+  onAuthStateChanged(auth, async (u)=>{
+    AppState.user=u||null;
+    AppState.member = u ? await carregarPerfil(u.uid) : null;
+    AppState.authPronto=true;
+    if(AppState.member) await sincronizarJornadaDoPerfil();
+    if(!ehEquipe()) AppState.modoEquipe=false;
+    if(AppState.area==='app') renderAppView();
+  }, (err)=>{
+    console.warn('Auth indisponível:', err);
+    AppState.authPronto=true;
+    if(authDesligado(err)) AppState.authErro='desligado';
+    if(AppState.area==='app') renderAppView();
+  });
+}
+
+/* ---------- telas ---------- */
+function campo(id, rotulo, tipo, valor, placeholder){
+  return `<div class="linha-form"><label>${rotulo}</label>
+    <input id="${id}" type="${tipo||'text'}" value="${escapeHtml(valor||'')}" placeholder="${escapeHtml(placeholder||'')}"></div>`;
+}
+
+function telaLogin(corpo){
+  const modo=AppState.loginModo||'entrar';
+  const el=document.createElement('div');
+  el.id='login-tela';
+  el.innerHTML=`
+    <div class="marca-topo">
+      <div class="nome">${escapeHtml(AppState.church.name||'Minha Igreja')}</div>
+      <div class="sub">${modo==='entrar'?'Entre para acompanhar sua jornada':'Crie sua conta em poucos segundos'}</div>
+    </div>
+    <div class="card">
+      <div id="login-erro"></div>
+      ${campo('lg-email','E-mail','email','','voce@email.com')}
+      ${campo('lg-senha','Senha','password','', modo==='entrar'?'sua senha':'mínimo 6 caracteres')}
+    </div>`;
+  corpo.appendChild(el);
+
+  if(AppState.authErro==='desligado'){
+    el.querySelector('#login-erro').innerHTML='<div class="aviso-erro">O login ainda não foi ativado no Firebase deste projeto. Enquanto isso, dá para usar o app sem conta pelo link no rodapé.</div>';
+  }
+  const mostrarErro=txt=>{ el.querySelector('#login-erro').innerHTML='<div class="aviso-erro">'+escapeHtml(txt)+'</div>'; };
+
+  const b=document.createElement('button');
+  b.className='btn-app';
+  b.textContent = modo==='entrar' ? 'Entrar' : 'Criar conta';
+  b.addEventListener('click', async ()=>{
+    const email=el.querySelector('#lg-email').value.trim();
+    const senha=el.querySelector('#lg-senha').value;
+    if(!email || !senha){ mostrarErro('Preencha e-mail e senha.'); return; }
+    b.disabled=true; const antes=b.textContent; b.textContent='Aguarde…';
+    try{
+      if(modo==='entrar') await signInWithEmailAndPassword(auth, email, senha);
+      else await createUserWithEmailAndPassword(auth, email, senha);
+      // onAuthStateChanged assume daqui
+    }catch(err){
+      console.error('login:', err);
+      if(authDesligado(err)) AppState.authErro='desligado';
+      mostrarErro(mensagemAuth(err));
+      b.disabled=false; b.textContent=antes;
+    }
+  });
+  el.appendChild(b);
+
+  if(modo==='entrar'){
+    const esq=document.createElement('button');
+    esq.className='btn-app secundario';
+    esq.textContent='Esqueci minha senha';
+    esq.addEventListener('click', async ()=>{
+      const email=el.querySelector('#lg-email').value.trim();
+      if(!email){ mostrarErro('Escreva seu e-mail primeiro.'); return; }
+      try{ await sendPasswordResetEmail(auth, email); toast('Enviei um link de redefinição para seu e-mail.'); }
+      catch(err){ mostrarErro(mensagemAuth(err)); }
+    });
+    el.appendChild(esq);
+  }
+
+  const alt=document.createElement('div');
+  alt.className='alternar-login';
+  alt.innerHTML = modo==='entrar' ? 'Ainda não tem conta? ' : 'Já tem conta? ';
+  const link=document.createElement('button');
+  link.textContent = modo==='entrar' ? 'Criar conta' : 'Entrar';
+  link.addEventListener('click',()=>{ AppState.loginModo = modo==='entrar'?'criar':'entrar'; renderAppView(); });
+  alt.appendChild(link);
+  el.appendChild(alt);
+
+  const semConta=document.createElement('div');
+  semConta.className='alternar-login';
+  semConta.style.marginTop='22px';
+  const l2=document.createElement('button');
+  l2.style.color='var(--text-dim)';
+  l2.textContent='Sou da equipe — ir para a projeção';
+  l2.addEventListener('click',()=>irParaArea('operacao'));
+  semConta.appendChild(l2);
+  el.appendChild(semConta);
+}
+
+function telaCompletarCadastro(corpo){
+  const u=AppState.user;
+  const el=document.createElement('div');
+  el.innerHTML=`
+    <div class="marca-topo" style="text-align:center;margin:12px 0 22px;">
+      <div class="nome" style="font-size:21px;font-weight:700;">Falta pouco</div>
+      <div class="sub" style="font-size:13px;color:var(--text-dim);margin-top:5px;">Conte quem é você para a ${escapeHtml(AppState.church.name||'igreja')}</div>
+    </div>
+    <div class="card">
+      <div id="cad-erro"></div>
+      ${campo('cd-nome','Nome completo','text', u&&u.displayName||'','Como você quer ser chamado')}
+      ${campo('cd-tel','Telefone / WhatsApp','tel','','(00) 00000-0000')}
+      ${campo('cd-nasc','Data de nascimento','date','','')}
+      <div class="linha-form"><label>Sua ligação com a igreja</label>
+        <select id="cd-vinculo">
+          <option value="visitante">Estou visitando</option>
+          <option value="congregante">Congrego aqui</option>
+          <option value="membro">Sou membro</option>
+        </select>
+      </div>
+      ${campo('cd-codigo','Código da igreja (se você recebeu um)','text','','deixe em branco se não tiver')}
+    </div>`;
+  corpo.appendChild(el);
+  const erro=txt=>{ el.querySelector('#cad-erro').innerHTML='<div class="aviso-erro">'+escapeHtml(txt)+'</div>'; };
+
+  const b=document.createElement('button');
+  b.className='btn-app';
+  b.textContent='Concluir cadastro';
+  b.addEventListener('click', async ()=>{
+    const nome=el.querySelector('#cd-nome').value.trim();
+    if(!nome){ erro('Escreva seu nome.'); return; }
+    const codigo=el.querySelector('#cd-codigo').value.trim();
+    const codigoEquipe=(AppState.church.teamCode||'').trim();
+
+    b.disabled=true; b.textContent='Salvando…';
+    // ninguém da equipe ainda? quem chega primeiro assume, senão a igreja
+    // ficaria sem quem edita o conteúdo
+    let temEquipe=false;
+    try{
+      const snap=await getDocs(query(membersCollRef, where('role','==','equipe')));
+      temEquipe=!snap.empty;
+    }catch(e){ console.warn('checagem de equipe:', e); }
+
+    const role = (codigoEquipe && codigo===codigoEquipe) || !temEquipe ? 'equipe' : 'membro';
+    const m={
+      uid: u.uid,
+      email: u.email||'',
+      name: nome,
+      phone: el.querySelector('#cd-tel').value.trim(),
+      birth: el.querySelector('#cd-nasc').value||'',
+      bond: el.querySelector('#cd-vinculo').value,
+      churchCode: codigo,
+      role,
+      journeyProgress: AppState.journeyProgress||{},
+      createdAt: Date.now(),
+    };
+    try{
+      await salvarPerfil(m);
+      try{ await updateProfile(u,{displayName:nome}); }catch(e){}
+      AppState.member=m;
+      toast(role==='equipe' ? 'Cadastro concluído. Você entrou como equipe.' : 'Bem-vindo!');
+      abrirAppView('inicio');
+    }catch(err){
+      console.error('cadastro:', err);
+      erro('Não consegui salvar seu cadastro. '+(err&&err.message||''));
+      b.disabled=false; b.textContent='Concluir cadastro';
+    }
+  });
+  el.appendChild(b);
+
+  const sair=document.createElement('div');
+  sair.className='alternar-login';
+  const l=document.createElement('button');
+  l.style.color='var(--text-dim)';
+  l.textContent='Sair desta conta';
+  l.addEventListener('click',()=>signOut(auth));
+  sair.appendChild(l);
+  el.appendChild(sair);
+}
+
+function telaPerfil(corpo){
+  voltarPara(corpo,'mais','Voltar');
+  const m=AppState.member||{};
+  const c=document.createElement('div');
+  c.className='card';
+  c.innerHTML=`<div class="perfil-cabecalho">
+      <div class="perfil-avatar">${escapeHtml(iniciais())}</div>
+      <div style="min-width:0;">
+        <div style="font-size:16px;font-weight:600;">${escapeHtml(m.name||'')}</div>
+        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||'')}</div>
+      </div>
+    </div>
+    <p style="margin-top:10px;">
+      ${m.phone?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
+      <span class="chip">${escapeHtml({visitante:'Visitando',congregante:'Congrego aqui',membro:'Membro'}[m.bond]||'—')}</span>
+      ${m.role==='equipe'?'<span class="chip" style="background:var(--marca);color:#fff;">equipe</span>':''}
+    </p>`;
+  corpo.appendChild(c);
+
+  const ed=document.createElement('button');
+  ed.className='btn-app secundario';
+  ed.textContent='Editar meus dados';
+  ed.addEventListener('click',()=>{
+    m.name=prompt('Nome completo:', m.name||'')||m.name;
+    m.phone=prompt('Telefone / WhatsApp:', m.phone||'')||'';
+    salvarPerfil(m).then(()=>{ toast('Dados atualizados'); renderAppView(); });
+  });
+  corpo.appendChild(ed);
+
+  const sair=document.createElement('button');
+  sair.className='btn-app secundario';
+  sair.style.color='var(--accent)';
+  sair.textContent='Sair da conta';
+  sair.addEventListener('click',()=>{
+    if(!confirm('Sair da sua conta neste aparelho?')) return;
+    signOut(auth).then(()=>{ AppState.appView='inicio'; toast('Você saiu.'); });
+  });
+  corpo.appendChild(sair);
+}
 
 /* ---------- Jornada de crescimento ----------
    Trilha de discipulado: a igreja define as etapas, o membro marca o
@@ -2762,6 +3093,7 @@ function alternarEtapa(id){
   if(etapaConcluida(id)) delete AppState.journeyProgress[id];
   else AppState.journeyProgress[id]={done:true, at:Date.now()};
   salvarProgressoJornada();
+  guardarProgressoNaConta();   // com conta, o progresso é da pessoa e acompanha o aparelho novo
 }
 // primeira etapa ainda não concluída — é nela que o membro está
 function etapaAtual(){
@@ -2911,6 +3243,10 @@ function telaJornadaEtapa(corpo){
 
 function telaInicio(corpo){
   const prox=eventosFuturos()[0];
+  const ola=document.createElement('div');
+  ola.style.cssText='font-size:14px;color:var(--text-dim);margin:0 2px 12px;';
+  ola.textContent = primeiroNome() ? ('Olá, '+primeiroNome()) : '';
+  if(primeiroNome()) corpo.appendChild(ola);
   const hero=document.createElement('div');
   hero.className='card destaque';
   hero.innerHTML = prox
@@ -3215,6 +3551,16 @@ function telaMais(corpo){
     el.addEventListener('click',()=>abrirAppView(view));
     corpo.appendChild(el);
   });
+  const tc=document.createElement('div'); tc.className='secao-titulo'; tc.textContent='Sua conta'; corpo.appendChild(tc);
+  const perf=document.createElement('div');
+  perf.className='item-lista'; perf.style.cursor='pointer';
+  perf.innerHTML=`<div class="perfil-avatar" style="width:44px;height:44px;font-size:15px;">${escapeHtml(iniciais())}</div>
+    <div class="corpo"><div class="t">${escapeHtml((AppState.member&&AppState.member.name)||'Minha conta')}</div><div class="s">Ver e editar meus dados</div></div>
+    <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;align-self:center;"></i>`;
+  perf.addEventListener('click',()=>abrirAppView('perfil'));
+  corpo.appendChild(perf);
+
+  if(!ehEquipe()) return;
   const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Equipe'; corpo.appendChild(t);
   const ops=document.createElement('div');
   ops.className='item-lista'; ops.style.cursor='pointer';
@@ -3659,6 +4005,7 @@ document.querySelectorAll('#app-tabs button').forEach(b=>{
 document.getElementById('btn-ir-operacao').addEventListener('click',()=>irParaArea('operacao'));
 document.getElementById('btn-voltar-app').addEventListener('click',()=>irParaArea('app'));
 document.getElementById('btn-modo-equipe').addEventListener('click',()=>{
+  if(!ehEquipe()){ toast('Só quem é da equipe edita o conteúdo.'); return; }
   AppState.modoEquipe=!AppState.modoEquipe;
   localStorage.setItem('holyrics_modo_equipe', AppState.modoEquipe?'1':'');
   document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ? '1' : '.55';
@@ -3682,6 +4029,7 @@ if(isTvMode){
   renderView();
   renderMediaPanel();
   updatePreview();
+  iniciarAuth();      // descobre quem está logado antes de mostrar o app
   aplicarArea();      // 'app' pro membro, 'operacao' pra equipe
   initCloudSync();    // celular/computador de operação: edita e controla
 }
