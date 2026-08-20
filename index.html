@@ -394,6 +394,33 @@ body.area-ops #app-area{ display:none !important; }
   #app-tabs button{ flex:0 0 120px; }
 }
 
+
+/* ---- jornada de crescimento (trilha de discipulado) ---- */
+.jornada-barra{ height:7px; background:var(--app-card-2); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
+.jornada-barra i{ display:block; height:100%; background:var(--marca); border-radius:99px; transition:width .35s ease; }
+.trilha{ position:relative; padding-left:38px; }
+.trilha::before{
+  content:''; position:absolute; left:15px; top:10px; bottom:22px;
+  width:2px; background:var(--app-card-2);
+}
+.etapa{ position:relative; margin-bottom:12px; cursor:pointer; }
+.etapa .bolha{
+  position:absolute; left:-38px; top:12px; width:32px; height:32px; border-radius:50%;
+  background:var(--app-card-2); color:var(--text-dim); display:flex; align-items:center;
+  justify-content:center; font-size:13px; font-weight:700; border:3px solid var(--app-bg); z-index:1;
+}
+.etapa.feita .bolha{ background:var(--marca); color:#fff; }
+.etapa.atual .bolha{ background:var(--app-card); color:var(--marca); box-shadow:0 0 0 2px var(--marca); }
+.etapa .caixa{ background:var(--app-card); border-radius:14px; padding:14px; }
+.etapa.atual .caixa{ border:1px solid var(--marca); }
+.etapa .caixa .t{ font-size:14px; font-weight:600; margin-bottom:3px; }
+.etapa.feita .caixa .t{ color:var(--text-dim); text-decoration:line-through; }
+.etapa .caixa .s{ font-size:12px; color:var(--text-dim); line-height:1.45; }
+@media (max-width:420px){
+  #app-tabs button{ font-size:9px; padding:8px 1px; }
+  #app-tabs button i{ font-size:15px; }
+}
+
 /* ===== RESPONSIVO / MOBILE ===== */
 #mini-live{display:none;}   /* no computador o preview grande já fica ao lado */
 #bottom-tabs{ display:none; }
@@ -501,6 +528,7 @@ body.area-ops #app-area{ display:none !important; }
     <button class="active" data-app-view="inicio"><i class="fa-solid fa-house"></i><span>Início</span></button>
     <button data-app-view="agenda"><i class="fa-solid fa-calendar-days"></i><span>Agenda</span></button>
     <button data-app-view="avisos"><i class="fa-solid fa-bullhorn"></i><span>Avisos</span></button>
+    <button data-app-view="jornada"><i class="fa-solid fa-route"></i><span>Jornada</span></button>
     <button data-app-view="contribuir"><i class="fa-solid fa-hand-holding-heart"></i><span>Contribuir</span></button>
     <button data-app-view="mais"><i class="fa-solid fa-ellipsis"></i><span>Mais</span></button>
   </nav>
@@ -697,6 +725,7 @@ const newsCollRef        = collection(db,'holyrics_news');
 const prayersCollRef     = collection(db,'holyrics_prayers');
 const devotionalsCollRef = collection(db,'holyrics_devotionals');
 const churchDocRef       = doc(db,'holyrics_data','church');
+const journeyCollRef     = collection(db,'holyrics_journey');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -879,7 +908,7 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap, evSnap, newsSnap, praySnap, devSnap, churchSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef), getDocs(eventsCollRef), getDocs(newsCollRef), getDocs(prayersCollRef), getDocs(devotionalsCollRef), getDoc(churchDocRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap, evSnap, newsSnap, praySnap, devSnap, churchSnap, jorSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef), getDocs(eventsCollRef), getDocs(newsCollRef), getDocs(prayersCollRef), getDocs(devotionalsCollRef), getDoc(churchDocRef), getDocs(journeyCollRef)]);
     if(!songsSnap.empty) AppState.songs = songsSnap.docs.map(d=>d.data());
     if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
     if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
@@ -891,6 +920,7 @@ async function initCloudSync(){
     AppState.news        = newsSnap.docs.map(d=>d.data());
     AppState.prayers     = praySnap.docs.map(d=>d.data());
     AppState.devotionals = devSnap.docs.map(d=>d.data());
+    AppState.journey     = jorSnap.docs.map(d=>d.data());
     if(churchSnap.exists()) AppState.church = Object.assign(AppState.church, churchSnap.data());
     if(AppState.area==='app') renderAppView();
     seedDefaultSongs();
@@ -949,7 +979,7 @@ async function initCloudSync(){
     aplicarEstadoLive(d);
   });
   // conteúdo do app: chega em tempo real em todo mundo
-  [[eventsCollRef,'events'],[newsCollRef,'news'],[prayersCollRef,'prayers'],[devotionalsCollRef,'devotionals']].forEach(([ref,campo])=>{
+  [[eventsCollRef,'events'],[newsCollRef,'news'],[prayersCollRef,'prayers'],[devotionalsCollRef,'devotionals'],[journeyCollRef,'journey']].forEach(([ref,campo])=>{
     onSnapshot(ref, {includeMetadataChanges:true}, snap=>{
       if(snap.metadata.hasPendingWrites) return;
       AppState[campo]=snap.docs.map(d=>d.data());
@@ -992,6 +1022,9 @@ const AppState = {
   appView: 'inicio',
   modoEquipe: false,      // revela os botões de editar conteúdo
   events: [], news: [], prayers: [], devotionals: [],
+  journey: [],            // etapas da jornada de crescimento
+  journeyProgress: {},    // o que ESTE aparelho já concluiu (sem login, é local)
+  journeyStepId: null,
   church: {name:'Centro Igreja', about:'', pixKey:'', pixName:'', bank:'', address:'', liveUrl:''},
   mobileActiveTab: 'bible',
 };
@@ -2682,6 +2715,8 @@ function renderAppView(){
   if(v==='inicio') telaInicio(corpo);
   else if(v==='agenda') telaAgenda(corpo);
   else if(v==='avisos') telaAvisos(corpo);
+  else if(v==='jornada') telaJornada(corpo);
+  else if(v==='jornadaEtapa') telaJornadaEtapa(corpo);
   else if(v==='contribuir') telaContribuir(corpo);
   else if(v==='mais') telaMais(corpo);
   else if(v==='oracao') telaOracao(corpo);
@@ -2704,6 +2739,174 @@ function voltarPara(corpo, view, rotulo){
   b.innerHTML='<i class="fa-solid fa-arrow-left"></i> '+rotulo;
   b.addEventListener('click',()=>abrirAppView(view));
   corpo.appendChild(b);
+}
+
+
+/* ---------- Jornada de crescimento ----------
+   Trilha de discipulado: a igreja define as etapas, o membro marca o
+   que já cumpriu. Sem login, o progresso é de quem está no aparelho —
+   fica no localStorage, não sobe pro Firestore. As ETAPAS, essas sim,
+   são da igreja e sincronizam para todo mundo. */
+function carregarProgressoJornada(){
+  try{ AppState.journeyProgress = JSON.parse(localStorage.getItem('holyrics_jornada')||'{}'); }
+  catch(e){ AppState.journeyProgress = {}; }
+}
+function salvarProgressoJornada(){
+  guardarLocal('holyrics_jornada', JSON.stringify(AppState.journeyProgress));
+}
+function etapasOrdenadas(){
+  return AppState.journey.slice().sort((a,b)=>(a.order||0)-(b.order||0));
+}
+function etapaConcluida(id){ return !!(AppState.journeyProgress[id] && AppState.journeyProgress[id].done); }
+function alternarEtapa(id){
+  if(etapaConcluida(id)) delete AppState.journeyProgress[id];
+  else AppState.journeyProgress[id]={done:true, at:Date.now()};
+  salvarProgressoJornada();
+}
+// primeira etapa ainda não concluída — é nela que o membro está
+function etapaAtual(){
+  return etapasOrdenadas().find(e=>!etapaConcluida(e.id)) || null;
+}
+function resumoJornada(){
+  const todas=etapasOrdenadas();
+  const feitas=todas.filter(e=>etapaConcluida(e.id)).length;
+  return {total:todas.length, feitas, pct: todas.length ? Math.round(feitas/todas.length*100) : 0};
+}
+
+const TRILHA_SUGERIDA=[
+  ['Decisão por Jesus','O primeiro passo da caminhada: entregar a vida a Cristo e começar de novo.'],
+  ['Batismo nas águas','Assumir publicamente a decisão que você tomou no coração.'],
+  ['Fundamentos da fé','Entender o básico: quem é Deus, o que é a Bíblia, oração e salvação.'],
+  ['Vida em célula','Ninguém cresce sozinho. Caminhar junto com um grupo pequeno.'],
+  ['Membresia','Fazer parte da família da igreja de forma comprometida.'],
+  ['Descobrindo seus dons','Identificar como Deus te formou e onde você serve melhor.'],
+  ['Servindo em um ministério','Colocar os dons em prática dentro de uma equipe.'],
+  ['Discipulando alguém','Levar outra pessoa pelo caminho que você já andou.'],
+];
+
+function telaJornada(corpo){
+  const etapas=etapasOrdenadas();
+
+  if(!etapas.length){
+    corpo.innerHTML='<div class="vazio">A jornada ainda não foi montada.<br>Ligue o modo equipe no ícone do lápis para criar as etapas.</div>';
+    const usar=botaoEquipe('Usar a trilha sugerida (8 etapas)', ()=>{
+      if(!confirm('Criar as 8 etapas sugeridas? Depois dá para editar e remover cada uma.')) return;
+      TRILHA_SUGERIDA.forEach(([title,description],i)=>{
+        const e={id:uid(), order:i, title, description, createdAt:Date.now()};
+        AppState.journey.push(e);
+        salvarDoc(journeyCollRef, e, 'a etapa');
+      });
+      renderAppView();
+    });
+    if(usar) corpo.appendChild(usar);
+    const nova=botaoEquipe('Criar etapa do zero', ()=>criarEtapaJornada());
+    if(nova) corpo.appendChild(nova);
+    return;
+  }
+
+  const r=resumoJornada();
+  const topo=document.createElement('div');
+  topo.className='card destaque';
+  const atual=etapaAtual();
+  topo.innerHTML=`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85;">Sua jornada</div>
+    <h3 style="font-size:19px;margin-top:5px;">${r.feitas} de ${r.total} etapas</h3>
+    <div class="jornada-barra"><i style="width:${r.pct}%"></i></div>
+    <p>${atual ? 'Agora: '+escapeHtml(atual.title) : 'Você concluiu a jornada inteira. Que tal discipular alguém?'}</p>`;
+  corpo.appendChild(topo);
+
+  const trilha=document.createElement('div');
+  trilha.className='trilha';
+  etapas.forEach((e,i)=>{
+    const feita=etapaConcluida(e.id);
+    const ehAtual=atual && atual.id===e.id;
+    const el=document.createElement('div');
+    el.className='etapa'+(feita?' feita':'')+(ehAtual?' atual':'');
+    el.innerHTML=`<div class="bolha">${feita?'<i class="fa-solid fa-check"></i>':(i+1)}</div>
+      <div class="caixa">
+        <div class="t">${escapeHtml(e.title||'')}</div>
+        <div class="s">${escapeHtml(e.description||'')}</div>
+      </div>`;
+    el.addEventListener('click',()=>{ AppState.journeyStepId=e.id; abrirAppView('jornadaEtapa'); });
+    trilha.appendChild(el);
+  });
+  corpo.appendChild(trilha);
+
+  const nova=botaoEquipe('Nova etapa', ()=>criarEtapaJornada());
+  if(nova) corpo.appendChild(nova);
+
+  if(r.feitas>0){
+    const zerar=document.createElement('button');
+    zerar.className='btn-app secundario';
+    zerar.textContent='Zerar meu progresso';
+    zerar.addEventListener('click',()=>{
+      if(!confirm('Desmarcar todas as etapas? Isso só afeta este aparelho.')) return;
+      AppState.journeyProgress={}; salvarProgressoJornada(); renderAppView();
+    });
+    corpo.appendChild(zerar);
+  }
+}
+
+function criarEtapaJornada(){
+  const title=prompt('Nome da etapa:',''); if(!title) return;
+  const description=prompt('Descrição (o que essa etapa envolve):','')||'';
+  const e={id:uid(), order:etapasOrdenadas().length, title, description, createdAt:Date.now()};
+  AppState.journey.push(e);
+  salvarDoc(journeyCollRef, e, 'a etapa');
+  renderAppView();
+}
+
+function telaJornadaEtapa(corpo){
+  const e=AppState.journey.find(x=>x.id===AppState.journeyStepId);
+  if(!e){ abrirAppView('jornada'); return; }
+  voltarPara(corpo,'jornada','Voltar para a jornada');
+  const feita=etapaConcluida(e.id);
+  const pos=etapasOrdenadas().findIndex(x=>x.id===e.id)+1;
+
+  const c=document.createElement('div');
+  c.className='card';
+  c.innerHTML=`<span class="chip">Etapa ${pos}</span>
+    <h3 style="font-size:19px;margin-top:10px;">${escapeHtml(e.title||'')}</h3>
+    ${e.description?`<p style="margin-top:8px;white-space:pre-wrap;">${escapeHtml(e.description)}</p>`:''}`;
+  corpo.appendChild(c);
+
+  const b=document.createElement('button');
+  b.className='btn-app'+(feita?' secundario':'');
+  b.innerHTML = feita ? '<i class="fa-solid fa-rotate-left"></i> Desmarcar etapa'
+                      : '<i class="fa-solid fa-check"></i> Concluí esta etapa';
+  b.addEventListener('click',()=>{
+    alternarEtapa(e.id);
+    const prox=etapaAtual();
+    if(!feita && prox) toast('Boa! Próxima: '+prox.title);
+    else if(!feita) toast('Jornada concluída!');
+    abrirAppView('jornada');
+  });
+  corpo.appendChild(b);
+
+  if(AppState.modoEquipe){
+    const ed=document.createElement('button');
+    ed.className='btn-app secundario';
+    ed.textContent='Editar esta etapa';
+    ed.addEventListener('click',()=>{
+      e.title=prompt('Nome da etapa:', e.title||'')||e.title;
+      e.description=prompt('Descrição:', e.description||'')||'';
+      salvarDoc(journeyCollRef, e, 'a etapa');
+      renderAppView();
+    });
+    corpo.appendChild(ed);
+    const rm=document.createElement('button');
+    rm.className='btn-app secundario';
+    rm.style.color='var(--accent)';
+    rm.textContent='Remover etapa';
+    rm.addEventListener('click',()=>{
+      if(!confirm('Remover a etapa "'+(e.title||'')+'"?')) return;
+      apagarDoc(journeyCollRef, e.id);
+      AppState.journey=AppState.journey.filter(x=>x.id!==e.id);
+      delete AppState.journeyProgress[e.id];
+      salvarProgressoJornada();
+      abrirAppView('jornada');
+    });
+    corpo.appendChild(rm);
+  }
 }
 
 function telaInicio(corpo){
@@ -2730,6 +2933,17 @@ function telaInicio(corpo){
     atalhos.appendChild(a);
   });
   corpo.appendChild(atalhos);
+
+  if(AppState.journey.length){
+    const r=resumoJornada(), atual=etapaAtual();
+    const t2=document.createElement('div'); t2.className='secao-titulo'; t2.textContent='Jornada de crescimento'; corpo.appendChild(t2);
+    const jc=document.createElement('div'); jc.className='card'; jc.style.cursor='pointer';
+    jc.innerHTML=`<h3>${atual ? escapeHtml(atual.title) : 'Jornada concluída'}</h3>
+      <div class="jornada-barra"><i style="width:${r.pct}%"></i></div>
+      <p>${r.feitas} de ${r.total} etapas</p>`;
+    jc.addEventListener('click',()=>abrirAppView('jornada'));
+    corpo.appendChild(jc);
+  }
 
   const dev=AppState.devotionals.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
   if(dev){
@@ -3455,6 +3669,7 @@ document.getElementById('btn-modo-equipe').style.opacity='.55';
 
 loadState();          // cache local, pra abrir instantâneo mesmo offline
 AppState.modoEquipe = localStorage.getItem('holyrics_modo_equipe')==='1';
+carregarProgressoJornada();
 document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ? '1' : '.55';
 AppState.area = isTvMode ? 'operacao' : (localStorage.getItem('holyrics_area') || 'app');
 if(isTvMode){
