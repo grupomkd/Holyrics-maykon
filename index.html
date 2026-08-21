@@ -413,6 +413,21 @@ body.area-ops #app-area{ display:none !important; }
   display:flex; align-items:center; justify-content:center; font-size:19px; font-weight:700; flex:none;
 }
 
+
+/* ---- painel de membros (equipe) ---- */
+.resumo-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px; }
+.resumo-cel{ background:var(--app-card); border-radius:12px; padding:11px 6px; text-align:center; }
+.resumo-cel .n{ font-size:19px; font-weight:700; color:var(--marca); line-height:1; }
+.resumo-cel .r{ font-size:9px; color:var(--text-dim); margin-top:4px; text-transform:uppercase; letter-spacing:.4px; }
+.busca-membros{ width:100%; background:var(--app-card-2); border:none; border-radius:10px; padding:11px; color:var(--text); font-size:14px; margin-bottom:10px; }
+.filtros{ display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:6px; }
+.filtro{ background:var(--app-card-2); color:var(--text-dim); font-size:11px; padding:6px 12px; border-radius:99px; white-space:nowrap; flex:none; }
+.filtro.on{ background:var(--marca); color:#fff; }
+.linha-membro{ display:flex; align-items:center; gap:11px; background:var(--app-card); border-radius:12px; padding:11px; margin-bottom:8px; cursor:pointer; }
+.passos-mini{ display:flex; gap:3px; margin-top:5px; }
+.passos-mini i{ width:16px; height:5px; border-radius:99px; background:var(--app-card-2); display:block; }
+.passos-mini i.ok{ background:var(--marca); }
+
 /* ---- jornada de crescimento (trilha de discipulado) ---- */
 .jornada-barra{ height:7px; background:var(--app-card-2); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
 .jornada-barra i{ display:block; height:100%; background:var(--marca); border-radius:99px; transition:width .35s ease; }
@@ -657,7 +672,6 @@ body.area-ops #app-area{ display:none !important; }
    ========================================================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDut6pM1ajgL8n-zjQCgEdqzLsj2IKgKtI",
@@ -746,7 +760,7 @@ const devotionalsCollRef = collection(db,'holyrics_devotionals');
 const churchDocRef       = doc(db,'holyrics_data','church');
 const journeyCollRef     = collection(db,'holyrics_journey');
 const membersCollRef     = collection(db,'holyrics_members');
-const auth = getAuth(fbApp);
+const accountsCollRef    = collection(db,'holyrics_accounts');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -1046,6 +1060,7 @@ const AppState = {
   journey: [],            // etapas da jornada de crescimento
   journeyProgress: {},    // o que ESTE aparelho já concluiu (sem login, é local)
   journeyStepId: null,
+  membros: null, membroAberto: null, buscaMembro:'', filtroMembro:'todos',
   user: null,             // conta autenticada (Firebase Auth)
   member: null,           // perfil da pessoa nesta igreja
   authPronto: false,      // já sabemos se tem alguém logado?
@@ -2768,6 +2783,8 @@ function renderAppView(){
   else if(v==='devocional') telaDevocional(corpo);
   else if(v==='sobre') telaSobre(corpo);
   else if(v==='perfil') telaPerfil(corpo);
+  else if(v==='membros') telaMembros(corpo);
+  else if(v==='membro') telaMembro(corpo);
   corpo.scrollTop=0;
 }
 function botaoEquipe(rotulo, aoClicar){
@@ -2796,25 +2813,65 @@ function voltarPara(corpo, view, rotulo){
    de propósito: a conta é da pessoa, o perfil é o vínculo dela
    com esta igreja.
    ========================================================= */
-const ERROS_AUTH={
-  'auth/invalid-email':'Esse e-mail não parece válido.',
-  'auth/user-not-found':'Não achei uma conta com esse e-mail.',
-  'auth/wrong-password':'Senha incorreta.',
-  'auth/invalid-credential':'E-mail ou senha incorretos.',
-  'auth/email-already-in-use':'Já existe uma conta com esse e-mail. Tente entrar.',
-  'auth/weak-password':'A senha precisa ter pelo menos 6 caracteres.',
-  'auth/too-many-requests':'Muitas tentativas seguidas. Espere um pouco.',
-  'auth/network-request-failed':'Sem conexão com a internet.',
-  'auth/configuration-not-found':'O login ainda não foi ativado no Firebase deste projeto.',
-  'auth/operation-not-allowed':'O login por e-mail e senha não está ativado no Firebase.',
-};
-function mensagemAuth(err){
-  const cod=(err&&err.code)||'';
-  return ERROS_AUTH[cod] || ('Não consegui concluir ('+(cod||err&&err.message||'erro')+').');
+// Conta própria, sem Firebase Auth: a senha nunca é guardada — o que vai
+// pro banco é o resultado de PBKDF2 (210 mil voltas de SHA-256) com um
+// sal aleatório por pessoa. Quem ler o banco não consegue voltar à senha.
+const PBKDF2_VOLTAS = 210000;
+
+function idDaConta(email){ return String(email||'').trim().toLowerCase(); }
+function paraBase64(bytes){ return btoa(String.fromCharCode.apply(null, Array.from(bytes))); }
+function deBase64(txt){ return Uint8Array.from(atob(txt), c=>c.charCodeAt(0)); }
+function novoSal(){ return paraBase64(crypto.getRandomValues(new Uint8Array(16))); }
+
+async function derivarSenha(senha, salB64){
+  const chave=await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+  const bits=await crypto.subtle.deriveBits(
+    {name:'PBKDF2', salt:deBase64(salB64), iterations:PBKDF2_VOLTAS, hash:'SHA-256'}, chave, 256);
+  return paraBase64(new Uint8Array(bits));
 }
-function authDesligado(err){
-  const c=(err&&err.code)||'';
-  return c==='auth/configuration-not-found' || c==='auth/operation-not-allowed';
+// comparação de tempo constante: sair mais cedo quando o primeiro caractere
+// difere entrega informação sobre o hash
+function iguais(a,b){
+  if(a.length!==b.length) return false;
+  let d=0;
+  for(let i=0;i<a.length;i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d===0;
+}
+
+async function criarConta(email, senha){
+  const id=idDaConta(email);
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id)) throw new Error('Esse e-mail não parece válido.');
+  if((senha||'').length<6) throw new Error('A senha precisa ter pelo menos 6 caracteres.');
+  const jaTem=await getDoc(doc(accountsCollRef, id));
+  if(jaTem.exists()) throw new Error('Já existe uma conta com esse e-mail. Tente entrar.');
+  const sal=novoSal();
+  const conta={email:id, uid:uid(), sal, hash:await derivarSenha(senha, sal), createdAt:Date.now()};
+  await setDoc(doc(accountsCollRef, id), conta);
+  return conta;
+}
+async function entrarComSenha(email, senha){
+  const id=idDaConta(email);
+  const s=await getDoc(doc(accountsCollRef, id));
+  if(!s.exists()) throw new Error('Não achei uma conta com esse e-mail.');
+  const c=s.data();
+  if(!iguais(await derivarSenha(senha, c.sal), c.hash)) throw new Error('Senha incorreta.');
+  return c;
+}
+async function trocarSenha(email, atual, nova){
+  const c=await entrarComSenha(email, atual);
+  if((nova||'').length<6) throw new Error('A nova senha precisa ter pelo menos 6 caracteres.');
+  const sal=novoSal();
+  await setDoc(doc(accountsCollRef, idDaConta(email)),
+    Object.assign({}, c, {sal, hash:await derivarSenha(nova, sal)}));
+}
+
+function guardarSessao(conta){ guardarLocal('holyrics_sessao', JSON.stringify({uid:conta.uid, email:conta.email})); }
+function lerSessao(){ try{ return JSON.parse(localStorage.getItem('holyrics_sessao')||'null'); }catch(e){ return null; } }
+function sairDaConta(){
+  localStorage.removeItem('holyrics_sessao');
+  AppState.user=null; AppState.member=null; AppState.modoEquipe=false;
+  AppState.appView='inicio'; AppState.loginModo='entrar';
+  renderAppView();
 }
 
 async function carregarPerfil(uid){
@@ -2836,19 +2893,23 @@ function iniciais(){
   return ((n[0]||'?')[0]+(n.length>1?n[n.length-1][0]:'')).toUpperCase();
 }
 
-/* O progresso da jornada nasceu no aparelho; quando a pessoa entra numa
-   conta ele passa a ser dela, e o que já estava marcado aqui é levado junto. */
+/* O progresso da jornada nasceu no aparelho, antes de existir conta. No
+   primeiro login de uma conta nova (journeyProgress ainda nem existe no
+   perfil), o que já estava marcado localmente é adotado como dela. Depois
+   disso, quem manda é sempre o que está salvo na conta — se eu mesclasse o
+   localStorage a cada login, trocar de conta no mesmo aparelho (uma família
+   dividindo um tablet, por exemplo) vazaria o progresso de uma pessoa para
+   a outra a cada troca. */
 async function sincronizarJornadaDoPerfil(){
   if(!AppState.member) return;
-  const local=AppState.journeyProgress||{};
-  const doPerfil=AppState.member.journeyProgress||{};
-  const juntos=Object.assign({}, doPerfil, local);
-  AppState.journeyProgress=juntos;
-  salvarProgressoJornada();
-  if(JSON.stringify(doPerfil)!==JSON.stringify(juntos)){
-    AppState.member.journeyProgress=juntos;
+  const perfilNuncaTeveProgresso = AppState.member.journeyProgress===undefined;
+  if(perfilNuncaTeveProgresso && Object.keys(AppState.journeyProgress||{}).length>0){
+    AppState.member.journeyProgress=AppState.journeyProgress;
     await salvarPerfil(AppState.member).catch(()=>{});
+  } else {
+    AppState.journeyProgress = AppState.member.journeyProgress||{};
   }
+  salvarProgressoJornada();
 }
 function guardarProgressoNaConta(){
   if(!AppState.member) return;
@@ -2856,20 +2917,16 @@ function guardarProgressoNaConta(){
   salvarPerfil(AppState.member).catch(()=>{});
 }
 
-function iniciarAuth(){
-  onAuthStateChanged(auth, async (u)=>{
-    AppState.user=u||null;
-    AppState.member = u ? await carregarPerfil(u.uid) : null;
-    AppState.authPronto=true;
+async function iniciarSessao(){
+  const s=lerSessao();
+  if(s && s.uid){
+    AppState.user={uid:s.uid, email:s.email};
+    AppState.member=await carregarPerfil(s.uid);
     if(AppState.member) await sincronizarJornadaDoPerfil();
-    if(!ehEquipe()) AppState.modoEquipe=false;
-    if(AppState.area==='app') renderAppView();
-  }, (err)=>{
-    console.warn('Auth indisponível:', err);
-    AppState.authPronto=true;
-    if(authDesligado(err)) AppState.authErro='desligado';
-    if(AppState.area==='app') renderAppView();
-  });
+  }
+  if(!ehEquipe()) AppState.modoEquipe=false;
+  AppState.authPronto=true;
+  if(AppState.area==='app') renderAppView();
 }
 
 /* ---------- telas ---------- */
@@ -2894,9 +2951,6 @@ function telaLogin(corpo){
     </div>`;
   corpo.appendChild(el);
 
-  if(AppState.authErro==='desligado'){
-    el.querySelector('#login-erro').innerHTML='<div class="aviso-erro">O login ainda não foi ativado no Firebase deste projeto. Enquanto isso, dá para usar o app sem conta pelo link no rodapé.</div>';
-  }
   const mostrarErro=txt=>{ el.querySelector('#login-erro').innerHTML='<div class="aviso-erro">'+escapeHtml(txt)+'</div>'; };
 
   const b=document.createElement('button');
@@ -2908,29 +2962,26 @@ function telaLogin(corpo){
     if(!email || !senha){ mostrarErro('Preencha e-mail e senha.'); return; }
     b.disabled=true; const antes=b.textContent; b.textContent='Aguarde…';
     try{
-      if(modo==='entrar') await signInWithEmailAndPassword(auth, email, senha);
-      else await createUserWithEmailAndPassword(auth, email, senha);
-      // onAuthStateChanged assume daqui
+      const conta = modo==='entrar' ? await entrarComSenha(email, senha) : await criarConta(email, senha);
+      guardarSessao(conta);
+      AppState.user={uid:conta.uid, email:conta.email};
+      AppState.member=await carregarPerfil(conta.uid);
+      if(AppState.member) await sincronizarJornadaDoPerfil();
+      renderAppView();
     }catch(err){
       console.error('login:', err);
-      if(authDesligado(err)) AppState.authErro='desligado';
-      mostrarErro(mensagemAuth(err));
+      mostrarErro(err.message||'Não consegui concluir.');
       b.disabled=false; b.textContent=antes;
     }
   });
   el.appendChild(b);
 
   if(modo==='entrar'){
-    const esq=document.createElement('button');
-    esq.className='btn-app secundario';
-    esq.textContent='Esqueci minha senha';
-    esq.addEventListener('click', async ()=>{
-      const email=el.querySelector('#lg-email').value.trim();
-      if(!email){ mostrarErro('Escreva seu e-mail primeiro.'); return; }
-      try{ await sendPasswordResetEmail(auth, email); toast('Enviei um link de redefinição para seu e-mail.'); }
-      catch(err){ mostrarErro(mensagemAuth(err)); }
-    });
-    el.appendChild(esq);
+    const dica=document.createElement('div');
+    dica.className='alternar-login';
+    dica.style.marginTop='10px';
+    dica.textContent='Esqueceu a senha? Fale com alguém da equipe.';
+    el.appendChild(dica);
   }
 
   const alt=document.createElement('div');
@@ -3011,7 +3062,6 @@ function telaCompletarCadastro(corpo){
     };
     try{
       await salvarPerfil(m);
-      try{ await updateProfile(u,{displayName:nome}); }catch(e){}
       AppState.member=m;
       toast(role==='equipe' ? 'Cadastro concluído. Você entrou como equipe.' : 'Bem-vindo!');
       abrirAppView('inicio');
@@ -3028,7 +3078,7 @@ function telaCompletarCadastro(corpo){
   const l=document.createElement('button');
   l.style.color='var(--text-dim)';
   l.textContent='Sair desta conta';
-  l.addEventListener('click',()=>signOut(auth));
+  l.addEventListener('click',()=>sairDaConta());
   sair.appendChild(l);
   el.appendChild(sair);
 }
@@ -3062,15 +3112,206 @@ function telaPerfil(corpo){
   });
   corpo.appendChild(ed);
 
+  const ts=document.createElement('button');
+  ts.className='btn-app secundario';
+  ts.textContent='Trocar minha senha';
+  ts.addEventListener('click', async ()=>{
+    const atual=prompt('Senha atual:'); if(!atual) return;
+    const nova=prompt('Nova senha (mínimo 6 caracteres):'); if(!nova) return;
+    try{ await trocarSenha(m.email, atual, nova); toast('Senha trocada.'); }
+    catch(err){ toast(err.message||'Não consegui trocar a senha.'); }
+  });
+  corpo.appendChild(ts);
+
   const sair=document.createElement('button');
   sair.className='btn-app secundario';
   sair.style.color='var(--accent)';
   sair.textContent='Sair da conta';
   sair.addEventListener('click',()=>{
     if(!confirm('Sair da sua conta neste aparelho?')) return;
-    signOut(auth).then(()=>{ AppState.appView='inicio'; toast('Você saiu.'); });
+    sairDaConta(); toast('Você saiu.');
   });
   corpo.appendChild(sair);
+}
+
+
+/* ---------- Painel de membros (só equipe) ----------
+   Responde a pergunta do líder: quem está onde. Cruza o vínculo da
+   pessoa (visitando / congrego / membro) com as aulas que ela já fez. */
+const ROTULO_VINCULO={visitante:'Visitante', congregante:'Congrega', membro:'Membro'};
+
+async function carregarMembros(){
+  try{
+    const snap=await getDocs(membersCollRef);
+    AppState.membros=snap.docs.map(d=>d.data());
+    return true;
+  }catch(e){ console.error('membros:', e); toast('Não consegui carregar os membros.'); return false; }
+}
+function progressoDe(m){
+  const etapas=etapasOrdenadas();
+  const feito=m.journeyProgress||{};
+  const feitas=etapas.filter(e=>feito[e.id]&&feito[e.id].done).length;
+  return {feitas, total:etapas.length, etapas, feito};
+}
+function proximaEtapaDe(m){
+  const {etapas, feito}=progressoDe(m);
+  return etapas.find(e=>!(feito[e.id]&&feito[e.id].done))||null;
+}
+
+function telaMembros(corpo){
+  voltarPara(corpo,'mais','Voltar');
+  if(!ehEquipe()){ corpo.innerHTML+='<div class="vazio">Só a equipe vê esta tela.</div>'; return; }
+  if(!AppState.membros){
+    corpo.innerHTML+='<div class="vazio">Carregando membros…</div>';
+    carregarMembros().then(()=>renderAppView());
+    return;
+  }
+  const etapas=etapasOrdenadas();
+  const todos=AppState.membros.slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+
+  // resumo por vínculo e por aula concluída
+  const cont={visitante:0, congregante:0, membro:0};
+  todos.forEach(m=>{ if(cont[m.bond]!==undefined) cont[m.bond]++; });
+  const resumo=document.createElement('div');
+  resumo.className='resumo-grid';
+  resumo.innerHTML=`
+    <div class="resumo-cel"><div class="n">${todos.length}</div><div class="r">pessoas</div></div>
+    <div class="resumo-cel"><div class="n">${cont.visitante}</div><div class="r">visitantes</div></div>
+    <div class="resumo-cel"><div class="n">${cont.congregante}</div><div class="r">congregam</div></div>
+    <div class="resumo-cel"><div class="n">${cont.membro}</div><div class="r">membros</div></div>`;
+  corpo.appendChild(resumo);
+
+  if(etapas.length){
+    const porEtapa=document.createElement('div');
+    porEtapa.className='resumo-grid';
+    porEtapa.style.gridTemplateColumns=`repeat(${Math.min(etapas.length,4)},1fr)`;
+    porEtapa.innerHTML=etapas.slice(0,4).map(e=>{
+      const n=todos.filter(m=>(m.journeyProgress||{})[e.id]).length;
+      return `<div class="resumo-cel"><div class="n">${n}</div><div class="r">${escapeHtml((e.title||'').slice(0,12))}</div></div>`;
+    }).join('');
+    corpo.appendChild(porEtapa);
+  }
+
+  const busca=document.createElement('input');
+  busca.className='busca-membros';
+  busca.placeholder='Buscar por nome…';
+  busca.value=AppState.buscaMembro||'';
+  corpo.appendChild(busca);
+
+  const filtros=document.createElement('div');
+  filtros.className='filtros';
+  const opcoes=[['todos','Todos'],['visitante','Visitantes'],['congregante','Congregam'],['membro','Membros'],['parados','Sem nenhuma aula'],['completos','Concluíram tudo']];
+  opcoes.forEach(([v,r])=>{
+    const b=document.createElement('button');
+    b.className='filtro'+((AppState.filtroMembro||'todos')===v?' on':'');
+    b.textContent=r;
+    b.addEventListener('click',()=>{ AppState.filtroMembro=v; renderAppView(); });
+    filtros.appendChild(b);
+  });
+  corpo.appendChild(filtros);
+
+  const lista=document.createElement('div');
+  corpo.appendChild(lista);
+
+  const desenhar=()=>{
+    const termo=(busca.value||'').trim().toLowerCase();
+    const f=AppState.filtroMembro||'todos';
+    const vis=todos.filter(m=>{
+      if(termo && !String(m.name||'').toLowerCase().includes(termo)) return false;
+      const pr=progressoDe(m);
+      if(f==='parados') return pr.feitas===0;
+      if(f==='completos') return pr.total>0 && pr.feitas===pr.total;
+      if(f!=='todos') return m.bond===f;
+      return true;
+    });
+    lista.innerHTML='';
+    if(!vis.length){ lista.innerHTML='<div class="vazio">Ninguém encontrado com esse filtro.</div>'; return; }
+    vis.forEach(m=>{
+      const pr=progressoDe(m);
+      const prox=proximaEtapaDe(m);
+      const el=document.createElement('div');
+      el.className='linha-membro';
+      el.innerHTML=`<div class="perfil-avatar" style="width:40px;height:40px;font-size:14px;">${escapeHtml(((m.name||'?').trim().split(/\s+/)[0]||'?')[0].toUpperCase())}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;">${escapeHtml(m.name||'(sem nome)')}
+            ${m.role==='equipe'?'<span class="chip" style="background:var(--marca);color:#fff;margin-left:5px;">equipe</span>':''}</div>
+          <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px;">
+            ${escapeHtml(ROTULO_VINCULO[m.bond]||'—')} · ${pr.feitas}/${pr.total} aulas${prox?' · falta '+escapeHtml(prox.title):' · completo'}
+          </div>
+          <div class="passos-mini">${pr.etapas.map(e=>`<i class="${(pr.feito[e.id]&&pr.feito[e.id].done)?'ok':''}"></i>`).join('')}</div>
+        </div>
+        <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;"></i>`;
+      el.addEventListener('click',()=>{ AppState.membroAberto=m.uid; abrirAppView('membro'); });
+      lista.appendChild(el);
+    });
+  };
+  busca.addEventListener('input',()=>{ AppState.buscaMembro=busca.value; desenhar(); });
+  desenhar();
+}
+
+function telaMembro(corpo){
+  voltarPara(corpo,'membros','Voltar para a lista');
+  const m=(AppState.membros||[]).find(x=>x.uid===AppState.membroAberto);
+  if(!m){ abrirAppView('membros'); return; }
+  const pr=progressoDe(m);
+
+  const c=document.createElement('div');
+  c.className='card';
+  c.innerHTML=`<div class="perfil-cabecalho">
+      <div class="perfil-avatar">${escapeHtml(((m.name||'?').trim().split(/\s+/)[0]||'?')[0].toUpperCase())}</div>
+      <div style="min-width:0;">
+        <div style="font-size:16px;font-weight:600;">${escapeHtml(m.name||'')}</div>
+        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||'')}</div>
+      </div>
+    </div>
+    <p style="margin-top:10px;">
+      <span class="chip">${escapeHtml(ROTULO_VINCULO[m.bond]||'—')}</span>
+      ${m.phone?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
+      ${m.birth?'<span class="chip">nasc. '+escapeHtml(m.birth)+'</span>':''}
+    </p>`;
+  corpo.appendChild(c);
+
+  const tv=document.createElement('div'); tv.className='secao-titulo'; tv.textContent='Ligação com a igreja'; corpo.appendChild(tv);
+  const sel=document.createElement('select');
+  sel.className='busca-membros';
+  sel.innerHTML=Object.entries(ROTULO_VINCULO).map(([v,r])=>`<option value="${v}"${m.bond===v?' selected':''}>${r}</option>`).join('');
+  sel.addEventListener('change',()=>{
+    m.bond=sel.value;
+    salvarPerfil(m).then(()=>toast('Atualizado'));
+    renderAppView();
+  });
+  corpo.appendChild(sel);
+
+  const ta=document.createElement('div'); ta.className='secao-titulo';
+  ta.textContent=`Aulas — ${pr.feitas} de ${pr.total}`; corpo.appendChild(ta);
+  if(!pr.etapas.length){ corpo.innerHTML+='<div class="vazio">Nenhuma aula cadastrada na jornada.</div>'; return; }
+
+  pr.etapas.forEach((e,i)=>{
+    const feita=!!(pr.feito[e.id]&&pr.feito[e.id].done);
+    const el=document.createElement('div');
+    el.className='linha-membro';
+    el.innerHTML=`<div class="perfil-avatar" style="width:32px;height:32px;font-size:13px;background:${feita?'var(--marca)':'var(--app-card-2)'};color:${feita?'#fff':'var(--text-dim)'};">
+        ${feita?'<i class="fa-solid fa-check"></i>':(i+1)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13.5px;font-weight:600;${feita?'color:var(--text-dim);':''}">${escapeHtml(e.title||'')}</div>
+        ${feita&&pr.feito[e.id].at?`<div style="font-size:11px;color:var(--text-dim);">concluída em ${new Date(pr.feito[e.id].at).toLocaleDateString('pt-BR')}</div>`:''}
+      </div>
+      <span style="font-size:11px;color:var(--marca);font-weight:600;">${feita?'desfazer':'marcar'}</span>`;
+    el.addEventListener('click',()=>{
+      m.journeyProgress=m.journeyProgress||{};
+      if(feita) delete m.journeyProgress[e.id];
+      else m.journeyProgress[e.id]={done:true, at:Date.now()};
+      salvarPerfil(m).then(()=>{
+        toast(feita?'Aula desmarcada':'Aula marcada como concluída');
+        // se for a própria pessoa, o app dela também acompanha
+        if(AppState.member && AppState.member.uid===m.uid){
+          AppState.member=m; AppState.journeyProgress=m.journeyProgress; salvarProgressoJornada();
+        }
+      });
+      renderAppView();
+    });
+    corpo.appendChild(el);
+  });
 }
 
 /* ---------- Jornada de crescimento ----------
@@ -3106,14 +3347,10 @@ function resumoJornada(){
 }
 
 const TRILHA_SUGERIDA=[
-  ['Decisão por Jesus','O primeiro passo da caminhada: entregar a vida a Cristo e começar de novo.'],
-  ['Batismo nas águas','Assumir publicamente a decisão que você tomou no coração.'],
-  ['Fundamentos da fé','Entender o básico: quem é Deus, o que é a Bíblia, oração e salvação.'],
-  ['Vida em célula','Ninguém cresce sozinho. Caminhar junto com um grupo pequeno.'],
-  ['Membresia','Fazer parte da família da igreja de forma comprometida.'],
-  ['Descobrindo seus dons','Identificar como Deus te formou e onde você serve melhor.'],
-  ['Servindo em um ministério','Colocar os dons em prática dentro de uma equipe.'],
-  ['Discipulando alguém','Levar outra pessoa pelo caminho que você já andou.'],
+  ['Passo 1','Primeira aula da jornada de crescimento.'],
+  ['Passo 2','Segunda aula da jornada de crescimento.'],
+  ['Passo 3','Terceira aula da jornada de crescimento.'],
+  ['Passo 4','Quarta aula da jornada de crescimento.'],
 ];
 
 function telaJornada(corpo){
@@ -3121,8 +3358,8 @@ function telaJornada(corpo){
 
   if(!etapas.length){
     corpo.innerHTML='<div class="vazio">A jornada ainda não foi montada.<br>Ligue o modo equipe no ícone do lápis para criar as etapas.</div>';
-    const usar=botaoEquipe('Usar a trilha sugerida (8 etapas)', ()=>{
-      if(!confirm('Criar as 8 etapas sugeridas? Depois dá para editar e remover cada uma.')) return;
+    const usar=botaoEquipe('Criar os 4 Passos', ()=>{
+      if(!confirm('Criar as aulas Passo 1 a 4? Depois dá para editar o texto de cada uma.')) return;
       TRILHA_SUGERIDA.forEach(([title,description],i)=>{
         const e={id:uid(), order:i, title, description, createdAt:Date.now()};
         AppState.journey.push(e);
@@ -3562,6 +3799,13 @@ function telaMais(corpo){
 
   if(!ehEquipe()) return;
   const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Equipe'; corpo.appendChild(t);
+  const mb=document.createElement('div');
+  mb.className='item-lista'; mb.style.cursor='pointer';
+  mb.innerHTML=`<div class="data-bloco" style="min-width:44px;padding:11px;"><i class="fa-solid fa-users" style="color:var(--marca);font-size:16px;"></i></div>
+    <div class="corpo"><div class="t">Membros</div><div class="s">Quem é quem e em que aula cada um está</div></div>
+    <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;align-self:center;"></i>`;
+  mb.addEventListener('click',()=>{ AppState.membros=null; abrirAppView('membros'); });
+  corpo.appendChild(mb);
   const ops=document.createElement('div');
   ops.className='item-lista'; ops.style.cursor='pointer';
   ops.innerHTML=`<div class="data-bloco" style="min-width:44px;padding:11px;"><i class="fa-solid fa-sliders" style="color:var(--marca);font-size:16px;"></i></div>
@@ -4029,7 +4273,7 @@ if(isTvMode){
   renderView();
   renderMediaPanel();
   updatePreview();
-  iniciarAuth();      // descobre quem está logado antes de mostrar o app
+  iniciarSessao();    // descobre quem está logado antes de mostrar o app
   aplicarArea();      // 'app' pro membro, 'operacao' pra equipe
   initCloudSync();    // celular/computador de operação: edita e controla
 }
