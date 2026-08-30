@@ -596,7 +596,7 @@ body.area-ops #app-area{ display:none !important; }
         <div class="preview-text" id="preview-text-el">Selecione um slide</div>
         <div id="preview-media-backdrop" style="position:absolute;inset:0;background:#000;z-index:4;display:none;"></div>
         <img id="preview-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
-        <video id="preview-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
+        <video id="preview-media-video" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
         <video id="preview-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
       </div>
       <div class="transport">
@@ -643,7 +643,7 @@ body.area-ops #app-area{ display:none !important; }
   <div id="projection-text">Aguardando...</div>
   <div id="projection-media-backdrop" style="position:absolute;inset:0;background:#000;z-index:4;display:none;"></div>
   <img id="projection-media-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;">
-  <video id="projection-media-video" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
+  <video id="projection-media-video" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:5;display:none;"></video>
   <video id="projection-media-video-b" muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;z-index:5;display:none;opacity:0;"></video>
   <div id="projection-exit-hint">ESC para sair • F tela cheia • ← → slides</div>
 </div>
@@ -3917,9 +3917,19 @@ function tickLoopVideo(L){
     const meio=Math.min(L.fade, (v.duration/(v.playbackRate||1))*0.4)/2;
     const restante=(v.duration - v.currentTime)/(v.playbackRate||1);
     const decorrido=v.currentTime/(v.playbackRate||1);
+    // A entrada usa tempo de PAREDE, não o tempo interno do vídeo: numa rede
+    // lenta o arquivo pode levar segundos pra bufferizar, e nesse intervalo
+    // currentTime fica travado em 0 — se a entrada dependesse disso, a
+    // opacidade ficava forçada em zero o tempo todo do buffering, e o vídeo
+    // "sumia" até terminar de carregar. Detecta o início de um novo ciclo
+    // (primeira vez, ou o loop nativo reiniciando) pelo salto de decorrido
+    // voltando pra trás.
+    if(L.iniciadoEm===undefined || decorrido < (L.ultimoDecorrido||0) - 0.05) L.iniciadoEm=Date.now();
+    L.ultimoDecorrido=decorrido;
+    const entradaReal=(Date.now()-L.iniciadoEm)/1000;
     let op=1;
     if(restante<meio) op=Math.max(0, restante/meio);
-    else if(decorrido<meio) op=Math.min(1, decorrido/meio);
+    else if(entradaReal<meio) op=Math.min(1, entradaReal/meio);
     v.style.opacity=String(op);
     return;
   }
@@ -4135,7 +4145,14 @@ function updatePreview(){
   // já ligada por padrão (não tem controle na tela pra isso)
   ['preview-media-video','projection-media-video'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el) aplicarLoopVideo(el, videoNaTela, {speed:1, crossfade:MESCLAGEM_MIDIA, modo:'preto'});
+    if(!el) return;
+    // atributo nativo do HTML: o navegador mostra essa imagem sozinho enquanto
+    // não tem nenhum quadro do vídeo pra desenhar (rede lenta, primeiro
+    // carregamento). Sem isso, o buffer aparecia preto sólido em vez da
+    // miniatura que a gente já tem pronta.
+    const posterAtual = videoNaTela ? ((activeMedia && activeMedia.poster) || '') : '';
+    if(el.poster!==posterAtual) el.poster=posterAtual;
+    aplicarLoopVideo(el, videoNaTela, {speed:1, crossfade:MESCLAGEM_MIDIA, modo:'preto'});
   });
 
   // stage view
