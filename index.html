@@ -1721,7 +1721,16 @@ function renderSongList(el,filter){
     const item=document.createElement('div');
     item.className='song-item'+(AppState.currentSongId===s.id?' selected':'');
     item.innerHTML=`<div class="t">${s.title||'(sem título)'}</div><div class="a">${s.artist||'—'} · ${s.slides.length} slides</div>`;
-    item.addEventListener('click',()=>{AppState.currentSongId=s.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; sairDaPregacao(); renderView(); updatePreview();});
+    item.addEventListener('click',()=>{
+      // clicar na música que já está na tela tira ela de lá — mesmo padrão de
+      // ligar/desligar que já existe no painel de mídia e na pregação
+      if(AppState.currentSongId===s.id){
+        AppState.currentSongId=null; AppState.previewOverride=null;
+        renderView(); updatePreview();
+        return;
+      }
+      AppState.currentSongId=s.id; AppState.currentSlideIndex=0; AppState.previewOverride=null; sairDaPregacao(); renderView(); updatePreview();
+    });
     el.appendChild(item);
   });
 }
