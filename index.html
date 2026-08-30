@@ -2587,9 +2587,14 @@ function renderSermonCenter(container){
       ${mini}
       <span class="pl-title">${escapeHtml(rotuloItemPregacao(it))}</span>
       <span class="badge-noar">NO AR</span>
-      <button class="pl-play-btn btn sm ghost" title="Projetar"><i class="fa-solid fa-play"></i></button>
+      <button class="pl-play-btn btn sm ghost" title="${noAr?'Tirar do ar':'Projetar'}"><i class="fa-solid ${noAr?'fa-stop':'fa-play'}"></i></button>
       <button class="pl-del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>`;
-    row.querySelector('.pl-play-btn').addEventListener('click',e=>{ e.stopPropagation(); projetarItemPregacao(sermon, idx); });
+    // clicar de novo no item que já está no ar tira ele da tela — mesmo
+    // comportamento de ligar/desligar que já existe no painel de mídia
+    row.querySelector('.pl-play-btn').addEventListener('click',e=>{
+      e.stopPropagation();
+      if(noAr) pararItemPregacao(); else projetarItemPregacao(sermon, idx);
+    });
     row.querySelector('.pl-del-btn').addEventListener('click',e=>{
       e.stopPropagation();
       if(it.type==='image') deleteSermonSlideCloud(it.slideId);
@@ -2621,6 +2626,18 @@ function sairDaPregacao(){
   AppState.sermonImage=null;
   AppState.sermonVideo=null;
   AppState.liveSermonItemId=null;
+}
+
+// tira da tela o que a pregação colocou, sem apagar tudo (blackout é outro
+// botão, deliberado); some inclusive a música se foi ela que estava no ar
+function pararItemPregacao(){
+  AppState.liveSermonItemId=null;
+  AppState.sermonImage=null;
+  AppState.sermonVideo=null;
+  AppState.previewOverride=null;
+  AppState.currentSongId=null;
+  updatePreview();
+  if(AppState.view==='sermon') renderView();
 }
 
 function projetarItemPregacao(sermon, idx, jaTentouCarregar){
