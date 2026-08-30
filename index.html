@@ -540,6 +540,7 @@ body.area-ops #app-area{ display:none !important; }
   <button class="tab-btn" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i> Pregação</button>
   <button class="tab-btn" data-view="playlist"><i class="fa-solid fa-list-check"></i> Playlist</button>
   <button class="tab-btn" data-view="luz"><i class="fa-solid fa-lightbulb"></i> Luz</button>
+  <button class="tab-btn" data-view="cronograma"><i class="fa-solid fa-list-check"></i> Cronograma</button>
   <div id="topbar-spacer"></div>
   <span id="sync-status" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding:0 10px;">
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
@@ -632,6 +633,7 @@ body.area-ops #app-area{ display:none !important; }
   <button class="bt-item" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i><span>Pregação</span></button>
   <button class="bt-item" data-view="playlist"><i class="fa-solid fa-list-check"></i><span>Playlist</span></button>
   <button class="bt-item" data-view="luz"><i class="fa-solid fa-lightbulb"></i><span>Luz</span></button>
+  <button class="bt-item" data-view="cronograma"><i class="fa-solid fa-list-check"></i><span>Cronograma</span></button>
   <button class="bt-item" data-pane="right"><i class="fa-solid fa-tv"></i><span>Ao Vivo</span></button>
   <button class="bt-item" data-view="themes"><i class="fa-solid fa-palette"></i><span>Temas</span></button>
 </div>
@@ -761,6 +763,7 @@ const prayersCollRef     = collection(db,'holyrics_prayers');
 const devotionalsCollRef = collection(db,'holyrics_devotionals');
 const churchDocRef       = doc(db,'holyrics_data','church');
 const journeyCollRef     = collection(db,'holyrics_journey');
+const cronogramasCollRef = collection(db,'holyrics_cronogramas');
 const membersCollRef     = collection(db,'holyrics_members');
 const accountsCollRef    = collection(db,'holyrics_accounts');
 
@@ -945,7 +948,7 @@ function applyLiveToPreview(){
 async function initCloudSync(){
   updateSyncStatus('connecting');
   try{
-    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap, evSnap, newsSnap, praySnap, devSnap, churchSnap, jorSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef), getDocs(eventsCollRef), getDocs(newsCollRef), getDocs(prayersCollRef), getDocs(devotionalsCollRef), getDoc(churchDocRef), getDocs(journeyCollRef)]);
+    const [songsSnap, themesSnap, plSnap, mediaSnap, metaSnap, sermonsSnap, liveSnap, evSnap, newsSnap, praySnap, devSnap, churchSnap, jorSnap, cronSnap] = await Promise.all([getDocs(songsCollRef), getDocs(themesCollRef), getDoc(playlistsDocRef), getDocs(mediaCollRef), getDoc(metaDocRef), getDocs(sermonsCollRef), getDoc(liveDocRef), getDocs(eventsCollRef), getDocs(newsCollRef), getDocs(prayersCollRef), getDocs(devotionalsCollRef), getDoc(churchDocRef), getDocs(journeyCollRef), getDocs(cronogramasCollRef)]);
     if(!songsSnap.empty) AppState.songs = songsSnap.docs.map(d=>d.data());
     if(!themesSnap.empty) AppState.themes = themesSnap.docs.map(d=>d.data());
     if(metaSnap.exists() && metaSnap.data().activeThemeId) AppState.activeThemeId = metaSnap.data().activeThemeId;
@@ -958,6 +961,7 @@ async function initCloudSync(){
     AppState.prayers     = praySnap.docs.map(d=>d.data());
     AppState.devotionals = devSnap.docs.map(d=>d.data());
     AppState.journey     = jorSnap.docs.map(d=>d.data());
+    AppState.cronogramas = cronSnap.docs.map(d=>d.data());
     if(churchSnap.exists()) AppState.church = Object.assign(AppState.church, churchSnap.data());
     if(AppState.area==='app') renderAppView();
     seedDefaultSongs();
@@ -1006,6 +1010,11 @@ async function initCloudSync(){
     if(snap.metadata.hasPendingWrites) return;
     AppState.sermons = snap.docs.map(d=>d.data());
     if(AppState.view==='sermon') renderView();
+  });
+  onSnapshot(cronogramasCollRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    AppState.cronogramas = snap.docs.map(d=>d.data());
+    if(AppState.view==='cronograma') renderView();
   });
   // Mac e celular seguem o mesmo estado ao vivo: quem clicar em qualquer um
   // dos dois manda na tela, e o outro acompanha em vez de brigar
@@ -1064,6 +1073,7 @@ const AppState = {
   journeyStepId: null,
   luzStatus: 'verificando',  // 'verificando' | 'ok' | 'indisponivel'
   luzEquipamentos: [],       // vem de GET /lights do daemon local
+  cronogramas: [], currentCronogramaId: null,  // agenda interna do culto — nunca projetada
   membros: null, membroAberto: null, buscaMembro:'', filtroMembro:'todos',
   user: null,             // conta autenticada (Firebase Auth)
   member: null,           // perfil da pessoa nesta igreja
@@ -1346,6 +1356,11 @@ function renderView(){
     centerHeader.textContent='Controle';
     renderLuzLeft(leftBody);
     renderLuzCenter(centerBody);
+  } else if(AppState.view==='cronograma'){
+    leftHeader.textContent='Cronogramas';
+    centerHeader.textContent='Ordem do culto';
+    renderCronogramaLeft(leftBody);
+    renderCronogramaCenter(centerBody);
   }
   renderThemeSelect();
   updateMobilePaneAuto();
@@ -2335,6 +2350,135 @@ function renderLuzCenter(container){
         brightness:Number(brilho.value), hue:Number(hue.value), saturation:Number(sat.value)
       });
     });
+  });
+}
+
+
+/* =========================================================
+   CRONOGRAMA — ordem do culto, só pra referência do operador.
+   NUNCA aparece na projeção, no Modo TV nem no app do membro —
+   isso é intencional: é uma cola pra quem está operando, não
+   conteúdo pra platéia. Isolado do resto do app de propósito.
+   ========================================================= */
+function salvarCronograma(c){
+  return setDoc(doc(cronogramasCollRef, c.id), sanitizeForFirestore(c)).catch(()=>{
+    toast('Não consegui salvar o cronograma na nuvem.');
+  });
+}
+function apagarCronogramaCloud(id){ return deleteDoc(doc(cronogramasCollRef,id)).catch(()=>{}); }
+function currentCronograma(){ return AppState.cronogramas.find(c=>c.id===AppState.currentCronogramaId) || null; }
+
+function renderCronogramaLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<button class="btn accent sm" id="novo-cronograma-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Novo cronograma</button>
+  <div id="cronograma-list"></div>`;
+  container.appendChild(wrap);
+  wrap.querySelector('#novo-cronograma-btn').addEventListener('click',()=>{
+    const c={id:uid(), title:'Culto '+new Date().toLocaleDateString('pt-BR'), items:[], createdAt:Date.now()};
+    AppState.cronogramas.unshift(c); AppState.currentCronogramaId=c.id;
+    salvarCronograma(c); renderView();
+  });
+  const listEl=wrap.querySelector('#cronograma-list');
+  const ordenados=AppState.cronogramas.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(!ordenados.length) listEl.innerHTML='<div class="empty-hint">Nenhum cronograma ainda</div>';
+  ordenados.forEach(c=>{
+    const item=document.createElement('div');
+    item.className='song-item'+(AppState.currentCronogramaId===c.id?' selected':'');
+    const feitos=(c.items||[]).filter(i=>i.done).length;
+    item.innerHTML=`<div class="t">${escapeHtml(c.title||'(sem título)')}</div><div class="a">${feitos}/${(c.items||[]).length} feitos</div>`;
+    item.addEventListener('click',()=>{ AppState.currentCronogramaId=c.id; renderView(); });
+    listEl.appendChild(item);
+  });
+}
+
+function renderCronogramaCenter(container){
+  const c=currentCronograma();
+  if(!c){ container.innerHTML='<div class="empty-hint">Selecione ou crie um cronograma à esquerda.</div>'; return; }
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Título</label><input id="cr-title" value="${escapeHtml(c.title||'')}"></div>
+    <div class="field"><label>Colar tudo de uma vez (uma linha por item — cola exatamente como escreveu)</label>
+      <textarea id="cr-colar" style="min-height:110px;" placeholder="Abertura: Xanda&#10;Adoração: 19h10 às 19h45min&#10;Aviso: Júnior&#10;Oração: Xanda&#10;Generosidade: Regis + pause café&#10;Palavra: Regis"></textarea>
+    </div>
+    <div class="row" style="margin-bottom:16px;">
+      <button class="btn" id="cr-gerar-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar lista</button>
+      <button class="btn ghost" id="cr-add-btn"><i class="fa-solid fa-plus"></i> Item em branco</button>
+      <button class="btn ghost" id="cr-desmarcar-btn"><i class="fa-solid fa-rotate-left"></i> Desmarcar tudo</button>
+      <button class="btn ghost" id="cr-del-btn" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Excluir cronograma</button>
+    </div>
+    <div class="panel-header" style="padding-left:0;border:none;">Ordem do culto — arraste pra reordenar, clique pra marcar</div>
+    <div id="cronograma-items"></div>
+  `;
+  container.appendChild(wrap);
+  const q=sel=>wrap.querySelector(sel);
+  const gravar=()=>salvarCronograma(c);
+
+  q('#cr-title').addEventListener('input',e=>{ c.title=e.target.value; gravar(); });
+  q('#cr-gerar-btn').addEventListener('click',()=>{
+    const texto=q('#cr-colar').value;
+    const linhas=texto.split('\n').map(l=>l.trim()).filter(Boolean);
+    if(!linhas.length){ toast('Cole o cronograma no campo acima primeiro.'); return; }
+    const novos=linhas.map((l,i)=>({id:uid(), text:l, done:false, order:(c.items||[]).length+i}));
+    c.items=(c.items||[]).concat(novos);
+    q('#cr-colar').value='';
+    gravar(); renderView();
+    toast(`${novos.length} item(ns) adicionados`);
+  });
+  q('#cr-add-btn').addEventListener('click',()=>{
+    c.items=(c.items||[]); c.items.push({id:uid(), text:'Novo item', done:false, order:c.items.length});
+    gravar(); renderView();
+  });
+  q('#cr-desmarcar-btn').addEventListener('click',()=>{
+    (c.items||[]).forEach(i=>i.done=false);
+    gravar(); renderView();
+  });
+  q('#cr-del-btn').addEventListener('click',()=>{
+    if(!confirm('Excluir este cronograma?')) return;
+    apagarCronogramaCloud(c.id);
+    AppState.cronogramas=AppState.cronogramas.filter(x=>x.id!==c.id);
+    AppState.currentCronogramaId=null;
+    renderView();
+  });
+
+  const itemsEl=q('#cronograma-items');
+  const items=(c.items||[]).slice().sort((a,b)=>(a.order||0)-(b.order||0));
+  if(!items.length) itemsEl.innerHTML='<div class="empty-hint">Nada ainda. Cola o cronograma acima ou adiciona item por item.</div>';
+  // o primeiro item não marcado é "o próximo passo" — é isso que o operador
+  // quer bater o olho e achar rápido
+  const idxProximo = items.findIndex(i=>!i.done);
+  items.forEach((it,idx)=>{
+    const ehProximo = idx===idxProximo;
+    const row=document.createElement('div');
+    row.className='pl-item'+(ehProximo?' no-ar':'');
+    row.draggable=true; row.dataset.idx=idx;
+    row.style.cursor='pointer';
+    row.innerHTML=`<i class="fa-solid fa-grip-vertical" style="color:var(--text-dim);font-size:11px;"></i>
+      <span style="flex:none;width:20px;text-align:center;"><i class="fa-solid ${it.done?'fa-square-check':'fa-square'}" style="color:${it.done?'var(--accent)':'var(--text-dim)'};"></i></span>
+      <span class="pl-title" style="${it.done?'text-decoration:line-through;color:var(--text-dim);':''}">${escapeHtml(it.text||'')}</span>
+      ${ehProximo?'<span class="badge-noar">PRÓXIMO</span>':''}
+      <button class="pl-del-btn" title="Remover"><i class="fa-solid fa-xmark"></i></button>`;
+    row.addEventListener('click',e=>{
+      if(e.target.closest('.pl-del-btn')) return;
+      it.done=!it.done; gravar(); renderView();
+    });
+    row.querySelector('.pl-del-btn').addEventListener('click',e=>{
+      e.stopPropagation();
+      c.items=c.items.filter(x=>x.id!==it.id);
+      gravar(); renderView();
+    });
+    row.addEventListener('dragstart',()=>row.classList.add('dragging'));
+    row.addEventListener('dragend',()=>{ row.classList.remove('dragging'); gravar(); renderView(); });
+    row.addEventListener('dragover',ev=>{
+      ev.preventDefault();
+      const arrastando=itemsEl.querySelector('.dragging');
+      if(!arrastando||arrastando===row) return;
+      const r=row.getBoundingClientRect();
+      itemsEl.insertBefore(arrastando, (ev.clientY-r.top)<r.height/2 ? row : row.nextSibling);
+      const nova=[...itemsEl.children].map(el=>items[Number(el.dataset.idx)]);
+      c.items=nova.filter(Boolean).map((it2,i)=>({...it2, order:i}));
+      [...itemsEl.children].forEach((el,i)=>el.dataset.idx=i);
+    });
+    itemsEl.appendChild(row);
   });
 }
 
