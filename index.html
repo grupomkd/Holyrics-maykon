@@ -2083,6 +2083,12 @@ function renderMediaPanel(){
     thumb.innerHTML=`${midia}
       <button style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:4px;width:16px;height:16px;font-size:9px;color:#fff;" title="Remover">✕</button>`;
     thumb.addEventListener('click',()=>{
+      // vídeo local cujo arquivo não existe neste aparelho: avisa em vez de
+      // clicar e não acontecer nada, sem explicação nenhuma
+      if(ehVideo && String(m.url||'').startsWith('local:') && !resolverUrlVideo(m.url)){
+        toast('Este vídeo foi salvo em outro computador e não existe aqui. Suba o arquivo de novo neste aparelho, ou peça pra hospedar por link.');
+        return;
+      }
       AppState.activeMediaId = AppState.activeMediaId===m.id ? null : m.id;
       saveState(); renderMediaPanel(); updatePreview();
     });
