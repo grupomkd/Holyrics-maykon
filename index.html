@@ -539,6 +539,7 @@ body.area-ops #app-area{ display:none !important; }
   <button class="tab-btn" data-view="themes"><i class="fa-solid fa-palette"></i> Temas</button>
   <button class="tab-btn" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i> Pregação</button>
   <button class="tab-btn" data-view="playlist"><i class="fa-solid fa-list-check"></i> Playlist</button>
+  <button class="tab-btn" data-view="luz"><i class="fa-solid fa-lightbulb"></i> Luz</button>
   <div id="topbar-spacer"></div>
   <span id="sync-status" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding:0 10px;">
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
@@ -630,6 +631,7 @@ body.area-ops #app-area{ display:none !important; }
   <button class="bt-item" data-view="songs"><i class="fa-solid fa-music"></i><span>Músicas</span></button>
   <button class="bt-item" data-view="sermon"><i class="fa-solid fa-person-chalkboard"></i><span>Pregação</span></button>
   <button class="bt-item" data-view="playlist"><i class="fa-solid fa-list-check"></i><span>Playlist</span></button>
+  <button class="bt-item" data-view="luz"><i class="fa-solid fa-lightbulb"></i><span>Luz</span></button>
   <button class="bt-item" data-pane="right"><i class="fa-solid fa-tv"></i><span>Ao Vivo</span></button>
   <button class="bt-item" data-view="themes"><i class="fa-solid fa-palette"></i><span>Temas</span></button>
 </div>
@@ -1060,6 +1062,8 @@ const AppState = {
   journey: [],            // etapas da jornada de crescimento
   journeyProgress: {},    // o que ESTE aparelho já concluiu (sem login, é local)
   journeyStepId: null,
+  luzStatus: 'verificando',  // 'verificando' | 'ok' | 'indisponivel'
+  luzEquipamentos: [],       // vem de GET /lights do daemon local
   membros: null, membroAberto: null, buscaMembro:'', filtroMembro:'todos',
   user: null,             // conta autenticada (Firebase Auth)
   member: null,           // perfil da pessoa nesta igreja
@@ -1301,6 +1305,7 @@ function switchView(view){
   AppState.view = view;
   AppState.mobileActiveTab = view;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  if(view==='luz' && AppState.luzStatus==='verificando') luzVerificarStatus();
   renderView();
 }
 
@@ -1336,6 +1341,11 @@ function renderView(){
     centerHeader.textContent='Itens da playlist';
     renderPlaylistLeft(leftBody);
     renderPlaylistCenter(centerBody);
+  } else if(AppState.view==='luz'){
+    leftHeader.textContent='Luz de estúdio';
+    centerHeader.textContent='Controle';
+    renderLuzLeft(leftBody);
+    renderLuzCenter(centerBody);
   }
   renderThemeSelect();
   updateMobilePaneAuto();
@@ -2157,6 +2167,175 @@ function renderThemeSelect(){
     AppState.editingThemeId = sel.value;
     switchView('themes');
   };
+}
+
+
+/* =========================================================
+   LUZ DE ESTÚDIO — controla a Amaran 150c por um daemon local
+   Fala com um programinha (github.com/wesbos/amaran-BLE-control)
+   rodando NESTE computador, que conversa com a luz por Bluetooth.
+   Por isso só funciona no aparelho onde esse daemon está ligado —
+   é sempre http://localhost:2708, e navegador nenhum deixa uma
+   página https chamar um IP de rede comum (mixed content); só
+   localhost tem essa exceção. Em qualquer outro aparelho, esta aba
+   mostra a explicação em vez de travar tentando falar com um
+   servidor que não existe ali. Isolado de propósito do resto do
+   app — nada aqui toca em música, letra ou projeção.
+   ========================================================= */
+const LUZ_API = 'http://localhost:2708';
+const LUZ_CCT_PRESETS = [3200, 5600, 6500];
+
+async function luzChamar(caminho, opcoes){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(), 2500);
+  try{
+    const r=await fetch(LUZ_API+caminho, Object.assign({signal:ctrl.signal}, opcoes||{}));
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+async function luzVerificarStatus(){
+  try{
+    const d=await luzChamar('/');
+    AppState.luzStatus='ok';
+    AppState.luzEquipamentos=d.lights||[];
+  }catch(e){
+    AppState.luzStatus='indisponivel';
+    AppState.luzEquipamentos=[];
+  }
+  if(AppState.view==='luz') renderView();
+}
+async function luzComando(caminho, corpo){
+  try{
+    await luzChamar(caminho, corpo
+      ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(corpo)}
+      : {method:'POST'});
+  }catch(e){
+    toast('Não consegui falar com a luz: '+e.message);
+  }
+}
+
+function renderLuzLeft(container){
+  const wrap=document.createElement('div');
+  const cor = AppState.luzStatus==='ok' ? 'var(--accent)' : (AppState.luzStatus==='verificando' ? 'var(--text-dim)' : '#c94848');
+  const rotulo = {verificando:'Verificando…', ok:'Conectado', indisponivel:'Indisponível'}[AppState.luzStatus];
+  wrap.innerHTML=`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <span style="width:9px;height:9px;border-radius:50%;background:${cor};display:inline-block;flex:none;"></span>
+      <span style="font-size:13px;">${rotulo}</span>
+    </div>
+    <button class="btn ghost sm" id="luz-atualizar-btn" style="width:100%;"><i class="fa-solid fa-arrows-rotate"></i> Verificar de novo</button>
+  `;
+  container.appendChild(wrap);
+  wrap.querySelector('#luz-atualizar-btn').addEventListener('click',()=>{
+    AppState.luzStatus='verificando'; renderView();
+    luzVerificarStatus();
+  });
+}
+
+function renderLuzCenter(container){
+  const wrap=document.createElement('div');
+  container.appendChild(wrap);
+
+  if(AppState.luzStatus==='verificando'){
+    wrap.innerHTML='<div class="empty-hint">Verificando…</div>';
+    return;
+  }
+  if(AppState.luzStatus==='indisponivel'){
+    wrap.innerHTML=`
+      <div class="empty-hint" style="text-align:left;line-height:1.65;max-width:520px;">
+        <p style="margin-bottom:10px;"><strong>Não consegui falar com a luz.</strong></p>
+        <p style="margin-bottom:10px;">Isso só funciona no computador onde o programinha de controle da luz está ligado (o "daemon"). Se você está nesse computador agora, confira se ele está rodando.</p>
+        <p>Em qualquer outro aparelho — celular, outro notebook — esta aba nunca vai funcionar. É uma limitação do Bluetooth, não um bug: só quem está fisicamente perto da luz consegue falar com ela.</p>
+      </div>`;
+    return;
+  }
+  const eqs=AppState.luzEquipamentos;
+  if(!eqs.length){
+    wrap.innerHTML='<div class="empty-hint">Conectado, mas nenhuma luz configurada ainda.</div>';
+    return;
+  }
+
+  const todas=document.createElement('div');
+  todas.className='row'; todas.style.marginBottom='18px';
+  todas.innerHTML=`
+    <button class="btn accent" id="luz-todas-on"><i class="fa-solid fa-lightbulb"></i> Ligar todas</button>
+    <button class="btn ghost" id="luz-todas-off"><i class="fa-regular fa-lightbulb"></i> Desligar todas</button>
+  `;
+  wrap.appendChild(todas);
+  todas.querySelector('#luz-todas-on').addEventListener('click',()=>luzComando('/lights/on'));
+  todas.querySelector('#luz-todas-off').addEventListener('click',()=>luzComando('/lights/off'));
+
+  eqs.forEach(eq=>{
+    const card=document.createElement('div');
+    card.className='card'; card.style.marginBottom='16px';
+    card.innerHTML=`
+      <div class="panel-header" style="padding-left:0;border:none;">${escapeHtml(eq.name||eq.key)}</div>
+      <div class="row" style="margin-bottom:12px;">
+        <button class="btn accent sm" data-acao="on"><i class="fa-solid fa-lightbulb"></i> Ligar</button>
+        <button class="btn ghost sm" data-acao="off"><i class="fa-regular fa-lightbulb"></i> Desligar</button>
+      </div>
+      <div class="field"><label>Brilho (<span class="lz-brilho-val">80</span>%)</label>
+        <input type="range" class="lz-brilho" min="1" max="100" value="80" style="width:100%;"></div>
+
+      <div class="panel-header" style="padding-left:0;border:none;margin-top:14px;">Temperatura de cor</div>
+      <div class="row" style="margin-bottom:8px;flex-wrap:wrap;">
+        ${LUZ_CCT_PRESETS.map(k=>`<button class="btn ghost sm lz-cct-preset" data-kelvin="${k}">${k}K</button>`).join('')}
+      </div>
+      <div class="field"><label>CCT (<span class="lz-cct-val">5600</span>K)</label>
+        <input type="range" class="lz-cct" min="2500" max="7500" step="100" value="5600" style="width:100%;"></div>
+      <div class="field"><label>Verde/Magenta (<span class="lz-gm-val">0</span>)</label>
+        <input type="range" class="lz-gm" min="-10" max="10" step="1" value="0" style="width:100%;"></div>
+
+      <div class="panel-header" style="padding-left:0;border:none;margin-top:14px;">Cor (HSI)</div>
+      <div class="field"><label>Matiz (<span class="lz-hue-val">0</span>°)</label>
+        <input type="range" class="lz-hue" min="0" max="360" step="1" value="0" style="width:100%;"></div>
+      <div class="field"><label>Saturação (<span class="lz-sat-val">0</span>%)</label>
+        <input type="range" class="lz-sat" min="0" max="100" step="1" value="0" style="width:100%;"></div>
+      <button class="btn ghost sm" id="lz-aplicar-cor"><i class="fa-solid fa-palette"></i> Aplicar cor</button>
+    `;
+    wrap.appendChild(card);
+
+    card.querySelectorAll('[data-acao]').forEach(b=>{
+      b.addEventListener('click',()=>luzComando(`/lights/${eq.key}/${b.dataset.acao}`));
+    });
+
+    const brilho=card.querySelector('.lz-brilho'), brilhoVal=card.querySelector('.lz-brilho-val');
+    let tBrilho=null;
+    brilho.addEventListener('input',()=>{
+      brilhoVal.textContent=brilho.value;
+      clearTimeout(tBrilho);
+      tBrilho=setTimeout(()=>luzComando(`/lights/${eq.key}/brightness`,{value:Number(brilho.value)}), 150);
+    });
+
+    const cct=card.querySelector('.lz-cct'), cctVal=card.querySelector('.lz-cct-val');
+    const gm=card.querySelector('.lz-gm'), gmVal=card.querySelector('.lz-gm-val');
+    let tCct=null;
+    const enviarCct=()=>{
+      clearTimeout(tCct);
+      tCct=setTimeout(()=>luzComando(`/lights/${eq.key}/cct`,{
+        brightness:Number(brilho.value), kelvin:Number(cct.value), gm:Number(gm.value)
+      }), 150);
+    };
+    cct.addEventListener('input',()=>{ cctVal.textContent=cct.value; enviarCct(); });
+    gm.addEventListener('input',()=>{ gmVal.textContent=gm.value; enviarCct(); });
+    card.querySelectorAll('.lz-cct-preset').forEach(b=>{
+      b.addEventListener('click',()=>{
+        cct.value=b.dataset.kelvin; cctVal.textContent=cct.value;
+        enviarCct();
+      });
+    });
+
+    const hue=card.querySelector('.lz-hue'), hueVal=card.querySelector('.lz-hue-val');
+    const sat=card.querySelector('.lz-sat'), satVal=card.querySelector('.lz-sat-val');
+    hue.addEventListener('input',()=>{ hueVal.textContent=hue.value; });
+    sat.addEventListener('input',()=>{ satVal.textContent=sat.value; });
+    card.querySelector('#lz-aplicar-cor').addEventListener('click',()=>{
+      luzComando(`/lights/${eq.key}/hsi`,{
+        brightness:Number(brilho.value), hue:Number(hue.value), saturation:Number(sat.value)
+      });
+    });
+  });
 }
 
 /* =========================================================
