@@ -3877,14 +3877,25 @@ function tickLoopVideo(L){
 
   // Rede de segurança que vale pra qualquer modo: seja lá o que aconteça com
   // as contas de tempo abaixo (a mesclagem perder a corrida contra o fim real
-  // do arquivo — visto em produção com velocidade baixa — ou o navegador
-  // travar o vídeo por qualquer outro motivo), o vídeo NUNCA pode ficar parado
-  // esperando alguém clicar em algo. Isso é crítico sobretudo na TV, que só
-  // escuta o Firestore e não recebe clique nenhum — sem essa rede, um travamento
-  // lá fica preto até a próxima vez que o operador mexer em algo no controle.
-  if(!L.trocando && v.paused && v.currentTime>0.05){
-    try{ v.currentTime=0; }catch(e){}
-    v.play().catch(()=>{});
+  // do arquivo, o play() inicial nunca pegar — visto ao vivo na TV, presa em
+  // currentTime:0 por vários segundos — ou o navegador travar o vídeo por
+  // qualquer outro motivo), ele NUNCA pode ficar parado esperando alguém
+  // clicar em algo. Isso é crítico sobretudo na TV, que só escuta o Firestore
+  // e não recebe clique nenhum. Usa tempo de parede (não currentTime) pra não
+  // deixar de fora o caso de travar bem no início, com currentTime ainda perto
+  // de zero; 400ms de tolerância evita disparar durante a latência normal de
+  // arrancar um play().
+  if(!L.trocando){
+    if(v.paused){
+      if(!L.pausadoDesde) L.pausadoDesde=Date.now();
+      else if(Date.now()-L.pausadoDesde>400){
+        try{ if(v.currentTime>=v.duration-0.1) v.currentTime=0; }catch(e){}  // só reinicia do zero se travou perto do fim
+        v.play().catch(()=>{});
+        L.pausadoDesde=Date.now();   // tenta de novo em +400ms se essa tentativa também não pegar
+      }
+    } else {
+      L.pausadoDesde=null;
+    }
   }
 
   if(L.fade<=0) return;
