@@ -3873,7 +3873,21 @@ const MESCLAGEM_MIDIA = 0.8;
 
 function tickLoopVideo(L){
   const v=L.ativo, r=L.reserva;
-  if(!L.src || L.fade<=0) return;
+  if(!L.src) return;
+
+  // Rede de segurança que vale pra qualquer modo: seja lá o que aconteça com
+  // as contas de tempo abaixo (a mesclagem perder a corrida contra o fim real
+  // do arquivo — visto em produção com velocidade baixa — ou o navegador
+  // travar o vídeo por qualquer outro motivo), o vídeo NUNCA pode ficar parado
+  // esperando alguém clicar em algo. Isso é crítico sobretudo na TV, que só
+  // escuta o Firestore e não recebe clique nenhum — sem essa rede, um travamento
+  // lá fica preto até a próxima vez que o operador mexer em algo no controle.
+  if(!L.trocando && v.paused && v.currentTime>0.05){
+    try{ v.currentTime=0; }catch(e){}
+    v.play().catch(()=>{});
+  }
+
+  if(L.fade<=0) return;
   if(!v.duration || !isFinite(v.duration)) return;
   if(L.modo==='preto'){
     // Vídeo com conteúdo (logo, avisos): some para o preto e volta do preto.
