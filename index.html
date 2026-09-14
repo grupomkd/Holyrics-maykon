@@ -2199,6 +2199,16 @@ function renderThemeSelect(){
    ========================================================= */
 const LUZ_API = 'http://localhost:2708';
 const LUZ_CCT_PRESETS = [3200, 5600, 6500];
+// Atalhos de cor, parecidos com os do app oficial da Amaran. Os valores de
+// matiz/saturação são uma aproximação minha (o app oficial não expõe os
+// números exatos) — dá pra ajustar rodando /hsi e conferindo na luz.
+const LUZ_COR_PRESETS = [
+  ['Fogueira','#ff6a1a',25,90], ['Céu azul','#4f8fe0',210,55],
+  ['Lago à luz da lua','#7fb2e8',220,30], ['Deserto','#e0a85c',35,50],
+  ['Floresta','#3fae5a',120,60], ['Campo','#8ed05a',90,45],
+  ['Oceano','#1c6fb0',200,80], ['Sol','#ffcf40',50,75],
+  ['Sakura','#f2a6c8',330,35], ['Aurora','#3be0a0',150,65], ['Lavanda','#b48af0',270,40],
+];
 
 async function luzChamar(caminho, opcoes){
   const ctrl=new AbortController();
@@ -2303,6 +2313,12 @@ function renderLuzCenter(container){
         <input type="range" class="lz-gm" min="-10" max="10" step="1" value="0" style="width:100%;"></div>
 
       <div class="panel-header" style="padding-left:0;border:none;margin-top:14px;">Cor (HSI)</div>
+      <div class="row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+        ${LUZ_COR_PRESETS.map(([nome,cor,h,s])=>`
+          <button class="lz-cor-preset" data-hue="${h}" data-sat="${s}" title="${nome}"
+            style="width:34px;height:34px;border-radius:8px;background:${cor};border:2px solid transparent;flex:none;"></button>
+        `).join('')}
+      </div>
       <div class="field"><label>Matiz (<span class="lz-hue-val">0</span>°)</label>
         <input type="range" class="lz-hue" min="0" max="360" step="1" value="0" style="width:100%;"></div>
       <div class="field"><label>Saturação (<span class="lz-sat-val">0</span>%)</label>
@@ -2345,9 +2361,17 @@ function renderLuzCenter(container){
     const sat=card.querySelector('.lz-sat'), satVal=card.querySelector('.lz-sat-val');
     hue.addEventListener('input',()=>{ hueVal.textContent=hue.value; });
     sat.addEventListener('input',()=>{ satVal.textContent=sat.value; });
-    card.querySelector('#lz-aplicar-cor').addEventListener('click',()=>{
-      luzComando(`/lights/${eq.key}/hsi`,{
-        brightness:Number(brilho.value), hue:Number(hue.value), saturation:Number(sat.value)
+    const enviarHsi=()=>luzComando(`/lights/${eq.key}/hsi`,{
+      brightness:Number(brilho.value), hue:Number(hue.value), saturation:Number(sat.value)
+    });
+    card.querySelector('#lz-aplicar-cor').addEventListener('click', enviarHsi);
+    card.querySelectorAll('.lz-cor-preset').forEach(b=>{
+      b.addEventListener('click',()=>{
+        card.querySelectorAll('.lz-cor-preset').forEach(x=>x.style.borderColor='transparent');
+        b.style.borderColor='#fff';
+        hue.value=b.dataset.hue; hueVal.textContent=hue.value;
+        sat.value=b.dataset.sat; satVal.textContent=sat.value;
+        enviarHsi();
       });
     });
   });
