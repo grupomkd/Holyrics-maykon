@@ -4683,7 +4683,12 @@ loadState();          // cache local, pra abrir instantâneo mesmo offline
 AppState.modoEquipe = localStorage.getItem('holyrics_modo_equipe')==='1';
 carregarProgressoJornada();
 document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ? '1' : '.55';
-AppState.area = isTvMode ? 'operacao' : (localStorage.getItem('holyrics_area') || 'app');
+// ?area=app / ?area=operacao força a área e já regrava no localStorage deste
+// aparelho — resolve o caso de um navegador que ficou "preso" na tela de
+// projeção depois de alguém ter clicado "Sou da equipe" nele antes.
+const areaForcada = urlParams.get('area');
+if(areaForcada==='app' || areaForcada==='operacao') localStorage.setItem('holyrics_area', areaForcada);
+AppState.area = isTvMode ? 'operacao' : (areaForcada || localStorage.getItem('holyrics_area') || 'app');
 if(isTvMode){
   document.body.classList.add('area-ops');
   initTvMode();       // PC do telão: só escuta e projeta
