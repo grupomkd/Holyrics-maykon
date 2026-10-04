@@ -427,6 +427,25 @@ body.area-ops #app-area{ display:none !important; }
 .passos-mini{ display:flex; gap:3px; margin-top:5px; }
 .passos-mini i{ width:16px; height:5px; border-radius:99px; background:var(--app-card-2); display:block; }
 .passos-mini i.ok{ background:var(--marca); }
+.etapa-badge{ display:inline-block; font-size:10px; font-weight:600; padding:2px 8px; border-radius:99px; background:var(--app-card-2); color:var(--text-dim); vertical-align:middle; }
+.etapa-badge.visitando{ background:#3a2a12; color:#f0b460; }
+.etapa-badge.voltou{ background:#2b2f12; color:#c6d65a; }
+.etapa-badge.congrega{ background:#12302b; color:#5ad6bd; }
+.etapa-badge.discipulado{ background:#1c2a44; color:#7fb2e8; }
+.etapa-badge.membro{ background:#2a1c44; color:#b48af0; }
+.etapa-badge.servindo{ background:#12301c; color:#5ad67a; }
+.funil{ display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:14px; }
+.funil .fase{ background:var(--app-card); border-radius:10px; padding:9px 2px; text-align:center; cursor:pointer; border:2px solid transparent; }
+.funil .fase.on{ border-color:var(--marca); }
+.funil .fase .n{ font-size:18px; font-weight:700; line-height:1; }
+.funil .fase .r{ font-size:8.5px; color:var(--text-dim); margin-top:4px; text-transform:uppercase; letter-spacing:.3px; }
+.atencao{ background:var(--app-card); border-left:4px solid var(--accent); border-radius:12px; padding:11px 13px; margin-bottom:8px; cursor:pointer; }
+.atencao .t{ font-size:13.5px; font-weight:600; }
+.atencao .s{ font-size:11.5px; color:var(--text-dim); margin-top:3px; line-height:1.5; }
+.btn-zap{ display:inline-flex; align-items:center; gap:7px; background:#1f8f4e; color:#fff; font-size:13px; font-weight:600; padding:10px 14px; border-radius:10px; text-decoration:none; }
+.nota-cuidado{ background:var(--app-card); border-radius:10px; padding:9px 12px; margin-bottom:6px; font-size:13px; line-height:1.5; }
+.nota-cuidado small{ display:block; color:var(--text-dim); font-size:10.5px; margin-top:3px; }
+@media (max-width:380px){ .funil{ grid-template-columns:repeat(3,1fr); } }
 
 /* ---- jornada de crescimento (trilha de discipulado) ---- */
 .jornada-barra{ height:7px; background:var(--app-card-2); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
@@ -766,6 +785,7 @@ const journeyCollRef     = collection(db,'holyrics_journey');
 const cronogramasCollRef = collection(db,'holyrics_cronogramas');
 const membersCollRef     = collection(db,'holyrics_members');
 const accountsCollRef    = collection(db,'holyrics_accounts');
+const presencasCollRef   = collection(db,'holyrics_presencas');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTvMode = urlParams.get('tv') === '1';
@@ -1075,6 +1095,7 @@ const AppState = {
   luzEquipamentos: [],       // vem de GET /lights do daemon local
   cronogramas: [], currentCronogramaId: null,  // agenda interna do culto — nunca projetada
   membros: null, membroAberto: null, buscaMembro:'', filtroMembro:'todos',
+  presencas: [], presencasCarregadas: 0, presencaPendente: false,
   user: null,             // conta autenticada (Firebase Auth)
   member: null,           // perfil da pessoa nesta igreja
   authPronto: false,      // já sabemos se tem alguém logado?
@@ -3149,6 +3170,12 @@ function renderAppView(){
   }
   abas.style.display='';
   lapis.style.display = ehEquipe() ? '' : 'none';
+  if(AppState.presencaPendente){
+    AppState.presencaPendente=false;
+    history.replaceState(null,'',location.pathname);
+    AppState.appView='inicio';
+    if(!jaFezCheckinHoje()) fazerCheckin(); else toast('Sua presença de hoje já estava confirmada.');
+  }
 
   const v=AppState.appView;
   if(v==='inicio') telaInicio(corpo);
@@ -3249,7 +3276,7 @@ function lerSessao(){ try{ return JSON.parse(localStorage.getItem('holyrics_sess
 function sairDaConta(){
   localStorage.removeItem('holyrics_sessao');
   AppState.user=null; AppState.member=null; AppState.modoEquipe=false;
-  AppState.appView='inicio'; AppState.loginModo='entrar';
+  AppState.appView='inicio'; AppState.loginModo='rapido';
   renderAppView();
 }
 
@@ -3262,7 +3289,29 @@ async function carregarPerfil(uid){
 function salvarPerfil(m){
   return setDoc(doc(membersCollRef, m.uid), sanitizeForFirestore(m));
 }
-function ehEquipe(){ return !!(AppState.member && AppState.member.role==='equipe'); }
+/* Papéis: 'equipe' é o papel antigo (tudo liberado) e continua valendo como
+   pastor. Voluntário não vê dados de outras pessoas, só as próprias escalas. */
+const PAPEIS={membro:'Membro', voluntario:'Voluntário', lider:'Líder', tesoureira:'Tesoureira', pastor:'Pastor', equipe:'Equipe'};
+const PAPEIS_EQUIPE=['equipe','lider','pastor','tesoureira'];
+function papelDe(m){ return (m&&m.role)||'membro'; }
+function ehEquipe(){ return PAPEIS_EQUIPE.includes(papelDe(AppState.member)); }
+function ehPastor(){ const r=papelDe(AppState.member); return r==='pastor'||r==='equipe'; }
+
+/* PIN da equipe: um único código de 4 a 8 dígitos, guardado só como hash no
+   documento da igreja. Ele existe para ninguém virar pastor apenas digitando
+   o WhatsApp dele na entrada rápida — é uma trava de organização, não um cofre. */
+async function definirPinEquipe(pin){
+  if(!/^\d{4,8}$/.test(pin||'')) throw new Error('O PIN precisa ter de 4 a 8 números.');
+  const sal=novoSal();
+  AppState.church.pinSalt=sal;
+  AppState.church.pinHash=await derivarSenha(pin, sal);
+  salvarIgreja();
+}
+async function conferirPinEquipe(pin){
+  const c=AppState.church;
+  if(!c.pinHash || !c.pinSalt) return null;
+  return iguais(await derivarSenha(String(pin||''), c.pinSalt), c.pinHash);
+}
 function primeiroNome(){
   const n=(AppState.member&&AppState.member.name)||'';
   return n.split(' ')[0]||'';
@@ -3314,8 +3363,124 @@ function campo(id, rotulo, tipo, valor, placeholder){
     <input id="${id}" type="${tipo||'text'}" value="${escapeHtml(valor||'')}" placeholder="${escapeHtml(placeholder||'')}"></div>`;
 }
 
+function normalizarFone(t){
+  let d=String(t||'').replace(/\D/g,'');
+  if(d.length>11 && d.startsWith('55')) d=d.slice(2);
+  return d;
+}
+function linkWhats(fone, texto){
+  const d=normalizarFone(fone);
+  if(d.length<10) return '';
+  return 'https://wa.me/55'+d+(texto?'?text='+encodeURIComponent(texto):'');
+}
+
+/* Entrada sem senha: nome + WhatsApp. O WhatsApp vira a identidade da pessoa
+   (uid = tel_<números>), então o mesmo número em outro celular recupera o
+   perfil e a jornada. Perfis da equipe pedem o PIN. */
+function telaEntradaRapida(corpo){
+  const igreja=AppState.church.name||'Minha Igreja';
+  const el=document.createElement('div');
+  el.id='login-tela';
+  el.innerHTML=`
+    <div class="marca-topo">
+      <div class="nome">${escapeHtml(igreja)}</div>
+      <div class="sub">Que bom ter você aqui. Entre em segundos, sem senha.</div>
+    </div>
+    <div class="card">
+      <div id="login-erro"></div>
+      ${campo('rp-nome','Seu nome','text','','Como podemos te chamar')}
+      ${campo('rp-fone','WhatsApp','tel','','(00) 00000-0000')}
+      <div class="linha-form" id="rp-vinculo-box"><label>Sua ligação com a igreja</label>
+        <select id="rp-vinculo">
+          <option value="visitante">Estou visitando</option>
+          <option value="congregante">Congrego aqui</option>
+          <option value="membro">Sou membro</option>
+        </select>
+      </div>
+      <div id="rp-pin-box" style="display:none;">${campo('rp-pin','PIN da equipe','password','','seu PIN')}</div>
+    </div>`;
+  corpo.appendChild(el);
+  const mostrarErro=txt=>{ el.querySelector('#login-erro').innerHTML=txt?'<div class="aviso-erro">'+escapeHtml(txt)+'</div>':''; };
+
+  const b=document.createElement('button');
+  b.className='btn-app';
+  b.textContent='Entrar';
+  b.addEventListener('click', async ()=>{
+    const nome=el.querySelector('#rp-nome').value.trim();
+    const fone=normalizarFone(el.querySelector('#rp-fone').value);
+    const pinBox=el.querySelector('#rp-pin-box');
+    mostrarErro('');
+    if(fone.length<10){ mostrarErro('Digite o WhatsApp com DDD, por exemplo 54 99999-9999.'); return; }
+    b.disabled=true; const antes=b.textContent; b.textContent='Aguarde…';
+    try{
+      const meuUid='tel_'+fone;
+      let perfil=await carregarPerfil(meuUid);
+      if(perfil){
+        if(PAPEIS_EQUIPE.includes(papelDe(perfil))){
+          if(pinBox.style.display==='none'){
+            pinBox.style.display='';
+            el.querySelector('#rp-vinculo-box').style.display='none';
+            mostrarErro('Este perfil é da equipe. Digite o PIN para continuar.');
+            b.disabled=false; b.textContent=antes; return;
+          }
+          const ok=await conferirPinEquipe(el.querySelector('#rp-pin').value);
+          if(ok===null) throw new Error('Este perfil é da equipe e a igreja ainda não definiu o PIN. Peça ao pastor, ou entre uma vez com e-mail e senha.');
+          if(!ok) throw new Error('PIN incorreto.');
+        }
+      } else {
+        if(!nome) throw new Error('Escreva seu nome para criarmos seu perfil.');
+        let temPastor=true;
+        try{
+          const snap=await getDocs(query(membersCollRef, where('role','in',['equipe','pastor'])));
+          temPastor=!snap.empty;
+        }catch(e){ console.warn('checagem de pastor:', e); }
+        perfil={
+          uid:meuUid, email:'', name:nome, phone:fone,
+          bond:el.querySelector('#rp-vinculo').value,
+          role: temPastor ? 'membro' : 'pastor',
+          journeyProgress: AppState.journeyProgress||{},
+          createdAt: Date.now(),
+        };
+        await salvarPerfil(perfil);
+        if(perfil.role==='pastor') toast('Você é o primeiro: entrou como pastor. Defina o PIN em Mais → Sua conta.');
+      }
+      guardarSessao({uid:perfil.uid, email:''});
+      AppState.user={uid:perfil.uid, email:''};
+      AppState.member=perfil;
+      await sincronizarJornadaDoPerfil();
+      if(!ehEquipe()) AppState.modoEquipe=false;
+      renderAppView();
+    }catch(err){
+      console.error('entrada rápida:', err);
+      mostrarErro(err.message||'Não consegui entrar agora.');
+      b.disabled=false; b.textContent=antes;
+    }
+  });
+  el.appendChild(b);
+
+  const alt=document.createElement('div');
+  alt.className='alternar-login';
+  alt.innerHTML='Já tem conta com e-mail e senha? ';
+  const link=document.createElement('button');
+  link.textContent='Entrar assim';
+  link.addEventListener('click',()=>{ AppState.loginModo='entrar'; renderAppView(); });
+  alt.appendChild(link);
+  el.appendChild(alt);
+
+  const semConta=document.createElement('div');
+  semConta.className='alternar-login';
+  semConta.style.marginTop='22px';
+  const l2=document.createElement('button');
+  l2.style.color='var(--text-dim)';
+  l2.textContent='Sou da equipe — ir para a projeção';
+  l2.addEventListener('click',()=>irParaArea('operacao'));
+  semConta.appendChild(l2);
+  el.appendChild(semConta);
+}
+
 function telaLogin(corpo){
-  const modo=AppState.loginModo||'entrar';
+  const modo=AppState.loginModo||'rapido';
+  if(modo==='rapido'){ telaEntradaRapida(corpo); return; }
   const el=document.createElement('div');
   el.id='login-tela';
   el.innerHTML=`
@@ -3372,6 +3537,14 @@ function telaLogin(corpo){
   alt.appendChild(link);
   el.appendChild(alt);
 
+  const rapido=document.createElement('div');
+  rapido.className='alternar-login';
+  const l3=document.createElement('button');
+  l3.textContent='Prefiro entrar só com nome e WhatsApp';
+  l3.addEventListener('click',()=>{ AppState.loginModo='rapido'; renderAppView(); });
+  rapido.appendChild(l3);
+  el.appendChild(rapido);
+
   const semConta=document.createElement('div');
   semConta.className='alternar-login';
   semConta.style.marginTop='22px';
@@ -3422,11 +3595,11 @@ function telaCompletarCadastro(corpo){
     // ficaria sem quem edita o conteúdo
     let temEquipe=false;
     try{
-      const snap=await getDocs(query(membersCollRef, where('role','==','equipe')));
+      const snap=await getDocs(query(membersCollRef, where('role','in',['equipe','pastor'])));
       temEquipe=!snap.empty;
     }catch(e){ console.warn('checagem de equipe:', e); }
 
-    const role = (codigoEquipe && codigo===codigoEquipe) || !temEquipe ? 'equipe' : 'membro';
+    const role = !temEquipe ? 'pastor' : ((codigoEquipe && codigo===codigoEquipe) ? 'lider' : 'membro');
     const m={
       uid: u.uid,
       email: u.email||'',
@@ -3442,7 +3615,7 @@ function telaCompletarCadastro(corpo){
     try{
       await salvarPerfil(m);
       AppState.member=m;
-      toast(role==='equipe' ? 'Cadastro concluído. Você entrou como equipe.' : 'Bem-vindo!');
+      toast(role!=='membro' ? 'Cadastro concluído. Você entrou como '+PAPEIS[role].toLowerCase()+'.' : 'Bem-vindo!');
       abrirAppView('inicio');
     }catch(err){
       console.error('cadastro:', err);
@@ -3471,13 +3644,13 @@ function telaPerfil(corpo){
       <div class="perfil-avatar">${escapeHtml(iniciais())}</div>
       <div style="min-width:0;">
         <div style="font-size:16px;font-weight:600;">${escapeHtml(m.name||'')}</div>
-        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||'')}</div>
+        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||m.phone||'')}</div>
       </div>
     </div>
     <p style="margin-top:10px;">
-      ${m.phone?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
+      ${m.phone&&m.email?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
       <span class="chip">${escapeHtml({visitante:'Visitando',congregante:'Congrego aqui',membro:'Membro'}[m.bond]||'—')}</span>
-      ${m.role==='equipe'?'<span class="chip" style="background:var(--marca);color:#fff;">equipe</span>':''}
+      ${papelDe(m)!=='membro'?'<span class="chip" style="background:var(--marca);color:#fff;">'+escapeHtml(PAPEIS[papelDe(m)]||'')+(m.ministerio?' · '+escapeHtml(m.ministerio):'')+'</span>':''}
     </p>`;
   corpo.appendChild(c);
 
@@ -3486,21 +3659,37 @@ function telaPerfil(corpo){
   ed.textContent='Editar meus dados';
   ed.addEventListener('click',()=>{
     m.name=prompt('Nome completo:', m.name||'')||m.name;
-    m.phone=prompt('Telefone / WhatsApp:', m.phone||'')||'';
+    // o WhatsApp é a identidade de quem entrou sem senha: trocar quebraria o acesso
+    if(!String(m.uid).startsWith('tel_')) m.phone=prompt('Telefone / WhatsApp:', m.phone||'')||'';
     salvarPerfil(m).then(()=>{ toast('Dados atualizados'); renderAppView(); });
   });
   corpo.appendChild(ed);
 
-  const ts=document.createElement('button');
-  ts.className='btn-app secundario';
-  ts.textContent='Trocar minha senha';
-  ts.addEventListener('click', async ()=>{
-    const atual=prompt('Senha atual:'); if(!atual) return;
-    const nova=prompt('Nova senha (mínimo 6 caracteres):'); if(!nova) return;
-    try{ await trocarSenha(m.email, atual, nova); toast('Senha trocada.'); }
-    catch(err){ toast(err.message||'Não consegui trocar a senha.'); }
-  });
-  corpo.appendChild(ts);
+  if(m.email){
+    const ts=document.createElement('button');
+    ts.className='btn-app secundario';
+    ts.textContent='Trocar minha senha';
+    ts.addEventListener('click', async ()=>{
+      const atual=prompt('Senha atual:'); if(!atual) return;
+      const nova=prompt('Nova senha (mínimo 6 caracteres):'); if(!nova) return;
+      try{ await trocarSenha(m.email, atual, nova); toast('Senha trocada.'); }
+      catch(err){ toast(err.message||'Não consegui trocar a senha.'); }
+    });
+    corpo.appendChild(ts);
+  }
+
+  if(ehPastor()){
+    const pin=document.createElement('button');
+    pin.className='btn-app secundario';
+    pin.innerHTML='<i class="fa-solid fa-key"></i> '+(AppState.church.pinHash?'Trocar o PIN da equipe':'Definir o PIN da equipe');
+    pin.addEventListener('click', async ()=>{
+      const novo=prompt('PIN da equipe (4 a 8 números). É ele que protege os perfis de pastor, líder e tesoureira na entrada sem senha:');
+      if(!novo) return;
+      try{ await definirPinEquipe(novo.trim()); toast('PIN salvo.'); renderAppView(); }
+      catch(err){ toast(err.message||'Não consegui salvar o PIN.'); }
+    });
+    corpo.appendChild(pin);
+  }
 
   const sair=document.createElement('button');
   sair.className='btn-app secundario';
@@ -3514,18 +3703,94 @@ function telaPerfil(corpo){
 }
 
 
-/* ---------- Painel de membros (só equipe) ----------
-   Responde a pergunta do líder: quem está onde. Cruza o vínculo da
-   pessoa (visitando / congrego / membro) com as aulas que ela já fez. */
+/* ---------- Pessoas (só equipe) ----------
+   Responde a pergunta do pastor: quem está onde. Cruza o vínculo que a pessoa
+   declarou, as presenças registradas no "Cheguei hoje" e as aulas da jornada
+   para colocar cada um numa fase — e avisa quem precisa de um cuidado. */
 const ROTULO_VINCULO={visitante:'Visitante', congregante:'Congrega', membro:'Membro'};
+const FASES=[
+  ['visitando','Visitando'],['voltou','Voltou'],['congrega','Congrega'],
+  ['discipulado','Discipulado'],['membro','Membro'],['servindo','Servindo'],
+];
+const ROTULO_FASE=Object.fromEntries(FASES);
+const MINISTERIOS_SUGERIDOS='Louvor, Mídia, Recepção, Kids, Intercessão, Cozinha';
+const PESSOAS_CACHE_MS=5*60*1000;
 
+function hojeISO(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function diasEntre(iso){
+  const [a,m,d]=String(iso).split('-').map(Number);
+  const alvo=new Date(a,(m||1)-1,d||1);
+  const h=new Date(); h.setHours(0,0,0,0);
+  return Math.round((h-alvo)/86400000);
+}
+function rotuloHa(dias){
+  if(dias===null||dias===undefined) return 'sem presença registrada';
+  if(dias<=0) return 'veio hoje';
+  if(dias===1) return 'veio ontem';
+  if(dias<14) return 'veio há '+dias+' dias';
+  return 'não vem há '+Math.round(dias/7)+' semanas';
+}
+
+/* ----- presença ----- */
+function jaFezCheckinHoje(){
+  const m=AppState.member; if(!m) return false;
+  return localStorage.getItem('holyrics_checkin')===hojeISO()+'_'+m.uid;
+}
+async function fazerCheckin(){
+  const m=AppState.member; if(!m) return;
+  const dia=hojeISO(), id=dia+'_'+m.uid;
+  try{
+    await setDoc(doc(presencasCollRef,id), {id, uid:m.uid, name:m.name||'', data:dia, at:Date.now()});
+    guardarLocal('holyrics_checkin', id);
+    toast('Que bom te ver hoje'+(primeiroNome()?', '+primeiroNome():'')+'!');
+    if(AppState.area==='app') renderAppView();
+  }catch(e){
+    console.error('presença:', e);
+    toast('Não consegui registrar sua presença. Tente de novo.');
+  }
+}
+function hojeTemEncontro(){
+  if(new Date().getDay()===0) return true;
+  const hoje=hojeISO();
+  return AppState.events.some(ev=>ev.date===hoje);
+}
+
+/* ----- carregamento (membros + presenças, com cache curto) ----- */
+async function carregarPresencas(){
+  try{
+    const corte=new Date(); corte.setDate(corte.getDate()-150);
+    const iso=corte.getFullYear()+'-'+String(corte.getMonth()+1).padStart(2,'0')+'-'+String(corte.getDate()).padStart(2,'0');
+    const snap=await getDocs(query(presencasCollRef, where('data','>=',iso)));
+    AppState.presencas=snap.docs.map(d=>d.data());
+    return true;
+  }catch(e){ console.error('presenças:', e); return false; }
+}
 async function carregarMembros(){
   try{
     const snap=await getDocs(membersCollRef);
     AppState.membros=snap.docs.map(d=>d.data());
     return true;
-  }catch(e){ console.error('membros:', e); toast('Não consegui carregar os membros.'); return false; }
+  }catch(e){ console.error('membros:', e); toast('Não consegui carregar as pessoas.'); return false; }
 }
+function pessoasEmDia(){ return AppState.membros && (Date.now()-(AppState.pessoasCarregadasEm||0))<PESSOAS_CACHE_MS; }
+function garantirPessoas(){
+  if(pessoasEmDia()) return true;
+  if(AppState.carregandoPessoas) return false;
+  // falhou há pouco: espera um pouco antes de tentar de novo, senão cada
+  // renderização dispararia outra tentativa em loop
+  if(Date.now()-(AppState.pessoasFalhouEm||0)<30000) return false;
+  AppState.carregandoPessoas=true;
+  Promise.all([carregarMembros(), carregarPresencas()]).then(([a])=>{
+    AppState.carregandoPessoas=false;
+    if(a) AppState.pessoasCarregadasEm=Date.now(); else AppState.pessoasFalhouEm=Date.now();
+    if(AppState.area==='app') renderAppView();
+  });
+  return false;
+}
+
 function progressoDe(m){
   const etapas=etapasOrdenadas();
   const feito=m.journeyProgress||{};
@@ -3536,40 +3801,108 @@ function proximaEtapaDe(m){
   const {etapas, feito}=progressoDe(m);
   return etapas.find(e=>!(feito[e.id]&&feito[e.id].done))||null;
 }
+function metricasDe(m){
+  const datas=[...new Set(AppState.presencas.filter(p=>p.uid===m.uid).map(p=>p.data))].sort();
+  const ultima=datas[datas.length-1]||null;
+  return {vezes:datas.length, ultima, diasSemVir: ultima?diasEntre(ultima):null, datas};
+}
+function faseDaPessoa(m){
+  if(PAPEIS_EQUIPE.includes(papelDe(m)) || papelDe(m)==='voluntario' || m.ministerio) return 'servindo';
+  const pr=progressoDe(m), k=metricasDe(m);
+  if(pr.total>0 && pr.feitas===pr.total) return 'membro';
+  if(m.bond==='membro') return 'membro';
+  if(pr.feitas>0) return 'discipulado';
+  if(m.bond==='congregante' || k.vezes>=3) return 'congrega';
+  if(k.vezes>=2) return 'voltou';
+  return 'visitando';
+}
+function diasAteAniversario(m){
+  if(!m.birth) return null;
+  const [,mm,dd]=String(m.birth).split('-').map(Number);
+  if(!mm||!dd) return null;
+  const h=new Date(); h.setHours(0,0,0,0);
+  let alvo=new Date(h.getFullYear(),mm-1,dd);
+  if(alvo<h) alvo=new Date(h.getFullYear()+1,mm-1,dd);
+  return Math.round((alvo-h)/86400000);
+}
+function gruposDeAtencao(todos){
+  const g={visitantes:[], parados:[], sumidos:[], aniversarios:[]};
+  todos.forEach(m=>{
+    if(m.uid===(AppState.member&&AppState.member.uid)) return;
+    const k=metricasDe(m), fase=faseDaPessoa(m);
+    if(fase==='visitando'||fase==='voltou'){
+      const dias=k.diasSemVir!==null ? k.diasSemVir : Math.floor((Date.now()-(m.createdAt||Date.now()))/86400000);
+      if(dias>=14) g.visitantes.push(m);
+    }
+    const pr=progressoDe(m);
+    if(pr.feitas>0 && pr.feitas<pr.total){
+      const ult=Math.max(...pr.etapas.map(e=>(pr.feito[e.id]&&pr.feito[e.id].at)||0));
+      if(ult && (Date.now()-ult)/86400000>=30) g.parados.push(m);
+    }
+    if(k.vezes>=2 && k.diasSemVir>=21 && fase!=='visitando' && fase!=='voltou') g.sumidos.push(m);
+    const niver=diasAteAniversario(m);
+    if(niver!==null && niver<=7) g.aniversarios.push(m);
+  });
+  return g;
+}
+function totalAtencao(g){ return g.visitantes.length+g.parados.length+g.sumidos.length; }
+
+function mensagemWhats(m, fase){
+  const nome=(m.name||'').trim().split(/\s+/)[0]||'';
+  const ig=AppState.church.name||'nossa igreja';
+  const niver=diasAteAniversario(m);
+  if(niver!==null && niver<=7) return `Parabéns, ${nome}! Que Deus abençoe muito o seu novo ano. A ${ig} celebra com você!`;
+  const k=metricasDe(m);
+  if(fase==='visitando'||fase==='voltou') return `Oi ${nome}, aqui é da ${ig}! Foi uma alegria ter você com a gente. Como você está? Se precisar de oração ou quiser conversar, estou por aqui.`;
+  if(k.diasSemVir!==null && k.diasSemVir>=21) return `Oi ${nome}, sentimos sua falta na ${ig}! Está tudo bem com você? Posso orar por alguma coisa?`;
+  if(fase==='discipulado'){ const p=proximaEtapaDe(m); return `Oi ${nome}! Como está indo a jornada de crescimento?${p?' Posso te ajudar com o '+p.title+'?':''}`; }
+  return `Oi ${nome}, tudo bem? Aqui é da ${ig}.`;
+}
 
 function telaMembros(corpo){
   voltarPara(corpo,'mais','Voltar');
   if(!ehEquipe()){ corpo.innerHTML+='<div class="vazio">Só a equipe vê esta tela.</div>'; return; }
-  if(!AppState.membros){
-    corpo.innerHTML+='<div class="vazio">Carregando membros…</div>';
-    carregarMembros().then(()=>renderAppView());
+  if(!garantirPessoas()){
+    const c=document.createElement('div'); c.className='vazio'; c.textContent='Carregando as pessoas…'; corpo.appendChild(c);
     return;
   }
-  const etapas=etapasOrdenadas();
   const todos=AppState.membros.slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+  const fasePor=new Map(todos.map(m=>[m.uid, faseDaPessoa(m)]));
+  const g=gruposDeAtencao(todos);
+  const f=AppState.filtroMembro||'todos';
 
-  // resumo por vínculo e por aula concluída
-  const cont={visitante:0, congregante:0, membro:0};
-  todos.forEach(m=>{ if(cont[m.bond]!==undefined) cont[m.bond]++; });
-  const resumo=document.createElement('div');
-  resumo.className='resumo-grid';
-  resumo.innerHTML=`
-    <div class="resumo-cel"><div class="n">${todos.length}</div><div class="r">pessoas</div></div>
-    <div class="resumo-cel"><div class="n">${cont.visitante}</div><div class="r">visitantes</div></div>
-    <div class="resumo-cel"><div class="n">${cont.congregante}</div><div class="r">congregam</div></div>
-    <div class="resumo-cel"><div class="n">${cont.membro}</div><div class="r">membros</div></div>`;
-  corpo.appendChild(resumo);
-
-  if(etapas.length){
-    const porEtapa=document.createElement('div');
-    porEtapa.className='resumo-grid';
-    porEtapa.style.gridTemplateColumns=`repeat(${Math.min(etapas.length,4)},1fr)`;
-    porEtapa.innerHTML=etapas.slice(0,4).map(e=>{
-      const n=todos.filter(m=>(m.journeyProgress||{})[e.id]).length;
-      return `<div class="resumo-cel"><div class="n">${n}</div><div class="r">${escapeHtml((e.title||'').slice(0,12))}</div></div>`;
-    }).join('');
-    corpo.appendChild(porEtapa);
+  // --- o que pede cuidado ---
+  const avisos=[
+    ['att_visitantes', g.visitantes, 'Visitantes que não voltaram', 'há 14 dias ou mais sem presença registrada'],
+    ['att_sumidos',    g.sumidos,    'Quem sumiu', 'já vinha e está 3 semanas ou mais ausente'],
+    ['att_parados',    g.parados,    'Parados na jornada', 'sem avançar há 30 dias ou mais'],
+    ['att_aniversarios', g.aniversarios, 'Aniversariantes da semana', 'uma mensagem de carinho faz diferença'],
+  ].filter(([,lista])=>lista.length);
+  if(avisos.length){
+    const t=document.createElement('div'); t.className='secao-titulo'; t.textContent='Pedem um cuidado'; corpo.appendChild(t);
+    avisos.forEach(([chave,lista,titulo,sub])=>{
+      const el=document.createElement('div');
+      el.className='atencao';
+      el.style.borderLeftColor = f===chave ? 'var(--marca)' : '';
+      el.innerHTML=`<div class="t">${lista.length} · ${escapeHtml(titulo)}</div>
+        <div class="s">${escapeHtml(lista.slice(0,4).map(m=>(m.name||'').split(' ')[0]).join(', '))}${lista.length>4?' e mais '+(lista.length-4):''} — ${escapeHtml(sub)}</div>`;
+      el.addEventListener('click',()=>{ AppState.filtroMembro = f===chave?'todos':chave; renderAppView(); });
+      corpo.appendChild(el);
+    });
   }
+
+  // --- funil ---
+  const tf=document.createElement('div'); tf.className='secao-titulo'; tf.textContent=`${todos.length} pessoas por fase`; corpo.appendChild(tf);
+  const funil=document.createElement('div'); funil.className='funil';
+  FASES.forEach(([chave,rotulo])=>{
+    const n=todos.filter(m=>fasePor.get(m.uid)===chave).length;
+    const cel=document.createElement('div');
+    cel.className='fase'+(f===chave?' on':'');
+    cel.innerHTML=`<div class="n">${n}</div><div class="r">${rotulo}</div>`;
+    cel.addEventListener('click',()=>{ AppState.filtroMembro = f===chave?'todos':chave; renderAppView(); });
+    funil.appendChild(cel);
+  });
+  corpo.appendChild(funil);
 
   const busca=document.createElement('input');
   busca.className='busca-membros';
@@ -3577,62 +3910,75 @@ function telaMembros(corpo){
   busca.value=AppState.buscaMembro||'';
   corpo.appendChild(busca);
 
-  const filtros=document.createElement('div');
-  filtros.className='filtros';
-  const opcoes=[['todos','Todos'],['visitante','Visitantes'],['congregante','Congregam'],['membro','Membros'],['parados','Sem nenhuma aula'],['completos','Concluíram tudo']];
-  opcoes.forEach(([v,r])=>{
-    const b=document.createElement('button');
-    b.className='filtro'+((AppState.filtroMembro||'todos')===v?' on':'');
-    b.textContent=r;
-    b.addEventListener('click',()=>{ AppState.filtroMembro=v; renderAppView(); });
-    filtros.appendChild(b);
-  });
-  corpo.appendChild(filtros);
+  if(f!=='todos'){
+    const limpa=document.createElement('button');
+    limpa.className='filtro on'; limpa.style.marginBottom='10px';
+    limpa.innerHTML='Filtrando · tocar para ver todos <i class="fa-solid fa-xmark" style="margin-left:6px;"></i>';
+    limpa.addEventListener('click',()=>{ AppState.filtroMembro='todos'; renderAppView(); });
+    corpo.appendChild(limpa);
+  }
 
   const lista=document.createElement('div');
   corpo.appendChild(lista);
 
   const desenhar=()=>{
     const termo=(busca.value||'').trim().toLowerCase();
-    const f=AppState.filtroMembro||'todos';
+    const grupo={att_visitantes:g.visitantes, att_sumidos:g.sumidos, att_parados:g.parados, att_aniversarios:g.aniversarios}[f];
     const vis=todos.filter(m=>{
       if(termo && !String(m.name||'').toLowerCase().includes(termo)) return false;
-      const pr=progressoDe(m);
-      if(f==='parados') return pr.feitas===0;
-      if(f==='completos') return pr.total>0 && pr.feitas===pr.total;
-      if(f!=='todos') return m.bond===f;
+      if(grupo) return grupo.includes(m);
+      if(f!=='todos') return fasePor.get(m.uid)===f;
       return true;
     });
     lista.innerHTML='';
     if(!vis.length){ lista.innerHTML='<div class="vazio">Ninguém encontrado com esse filtro.</div>'; return; }
     vis.forEach(m=>{
-      const pr=progressoDe(m);
-      const prox=proximaEtapaDe(m);
+      const fase=fasePor.get(m.uid), k=metricasDe(m), pr=progressoDe(m), prox=proximaEtapaDe(m);
+      const zap=linkWhats(m.phone, mensagemWhats(m,fase));
       const el=document.createElement('div');
       el.className='linha-membro';
       el.innerHTML=`<div class="perfil-avatar" style="width:40px;height:40px;font-size:14px;">${escapeHtml(((m.name||'?').trim().split(/\s+/)[0]||'?')[0].toUpperCase())}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:14px;font-weight:600;">${escapeHtml(m.name||'(sem nome)')}
-            ${m.role==='equipe'?'<span class="chip" style="background:var(--marca);color:#fff;margin-left:5px;">equipe</span>':''}</div>
+            <span class="etapa-badge ${fase}" style="margin-left:5px;">${escapeHtml(ROTULO_FASE[fase])}${m.ministerio?' · '+escapeHtml(m.ministerio):''}</span></div>
           <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px;">
-            ${escapeHtml(ROTULO_VINCULO[m.bond]||'—')} · ${pr.feitas}/${pr.total} aulas${prox?' · falta '+escapeHtml(prox.title):' · completo'}
+            ${escapeHtml(rotuloHa(k.diasSemVir))}${fase==='discipulado'&&prox?' · próximo: '+escapeHtml(prox.title):''}
           </div>
-          <div class="passos-mini">${pr.etapas.map(e=>`<i class="${(pr.feito[e.id]&&pr.feito[e.id].done)?'ok':''}"></i>`).join('')}</div>
+          ${pr.total?`<div class="passos-mini">${pr.etapas.map(e=>`<i class="${(pr.feito[e.id]&&pr.feito[e.id].done)?'ok':''}"></i>`).join('')}</div>`:''}
         </div>
-        <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;"></i>`;
+        ${zap?`<a class="zap-mini" href="${zap}" target="_blank" rel="noopener" title="Chamar no WhatsApp" style="color:#25d366;font-size:22px;padding:6px;"><i class="fa-brands fa-whatsapp"></i></a>`:''}`;
+      const a=el.querySelector('.zap-mini');
+      if(a) a.addEventListener('click',ev=>ev.stopPropagation());
       el.addEventListener('click',()=>{ AppState.membroAberto=m.uid; abrirAppView('membro'); });
       lista.appendChild(el);
     });
   };
   busca.addEventListener('input',()=>{ AppState.buscaMembro=busca.value; desenhar(); });
   desenhar();
+
+  // --- QR da presença ---
+  const tq=document.createElement('div'); tq.className='secao-titulo'; tq.textContent='Presença no domingo'; corpo.appendChild(tq);
+  const url=location.origin+location.pathname+'?area=app&presenca=1';
+  const cq=document.createElement('div'); cq.className='card';
+  cq.innerHTML=`<p style="margin-bottom:10px;">Imprima este QR e deixe no hall. Quem escanear confirma "Cheguei hoje" em um toque, e é isso que alimenta o funil acima.</p>
+    <img alt="QR da presença" width="200" height="200" style="background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto 10px;"
+      src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=0&data=${encodeURIComponent(url)}">
+    <div style="font-size:11px;color:var(--text-dim);word-break:break-all;text-align:center;">${escapeHtml(url)}</div>`;
+  corpo.appendChild(cq);
+  const copiar=document.createElement('button');
+  copiar.className='btn-app secundario';
+  copiar.innerHTML='<i class="fa-solid fa-copy"></i> Copiar o link';
+  copiar.addEventListener('click',()=>{ navigator.clipboard.writeText(url).then(()=>toast('Link copiado'),()=>toast(url)); });
+  corpo.appendChild(copiar);
 }
 
 function telaMembro(corpo){
   voltarPara(corpo,'membros','Voltar para a lista');
   const m=(AppState.membros||[]).find(x=>x.uid===AppState.membroAberto);
   if(!m){ abrirAppView('membros'); return; }
-  const pr=progressoDe(m);
+  const pr=progressoDe(m), k=metricasDe(m), fase=faseDaPessoa(m);
+  const souEu=AppState.member && AppState.member.uid===m.uid;
+  const salvar=msg=>salvarPerfil(m).then(()=>{ if(msg) toast(msg); renderAppView(); }).catch(()=>toast('Não consegui salvar.'));
 
   const c=document.createElement('div');
   c.className='card';
@@ -3640,30 +3986,73 @@ function telaMembro(corpo){
       <div class="perfil-avatar">${escapeHtml(((m.name||'?').trim().split(/\s+/)[0]||'?')[0].toUpperCase())}</div>
       <div style="min-width:0;">
         <div style="font-size:16px;font-weight:600;">${escapeHtml(m.name||'')}</div>
-        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||'')}</div>
+        <div style="font-size:12px;color:var(--text-dim);word-break:break-all;">${escapeHtml(m.email||m.phone||'')}</div>
       </div>
     </div>
     <p style="margin-top:10px;">
+      <span class="etapa-badge ${fase}">${escapeHtml(ROTULO_FASE[fase])}</span>
       <span class="chip">${escapeHtml(ROTULO_VINCULO[m.bond]||'—')}</span>
-      ${m.phone?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
-      ${m.birth?'<span class="chip">nasc. '+escapeHtml(m.birth)+'</span>':''}
-    </p>`;
+      ${papelDe(m)!=='membro'?'<span class="chip" style="background:var(--marca);color:#fff;">'+escapeHtml(PAPEIS[papelDe(m)])+(m.ministerio?' · '+escapeHtml(m.ministerio):'')+'</span>':''}
+      ${m.phone&&m.email?'<span class="chip">'+escapeHtml(m.phone)+'</span>':''}
+      ${m.birth?'<span class="chip">nasc. '+escapeHtml(m.birth.split('-').reverse().join('/'))+'</span>':''}
+    </p>
+    <p style="margin-top:8px;font-size:12.5px;">${escapeHtml(rotuloHa(k.diasSemVir))} · ${k.vezes} presença${k.vezes===1?'':'s'} registrada${k.vezes===1?'':'s'}</p>`;
   corpo.appendChild(c);
 
+  const zap=linkWhats(m.phone, mensagemWhats(m,fase));
+  if(zap){
+    const wrap=document.createElement('div'); wrap.style.cssText='margin:12px 0 4px;';
+    wrap.innerHTML=`<a class="btn-zap" href="${zap}" target="_blank" rel="noopener"><i class="fa-brands fa-whatsapp"></i> Chamar no WhatsApp (mensagem pronta)</a>`;
+    corpo.appendChild(wrap);
+  }
+
+  // --- cuidado: anotações ---
+  const tn=document.createElement('div'); tn.className='secao-titulo'; tn.textContent='Cuidado'; corpo.appendChild(tn);
+  (m.notas||[]).slice().reverse().forEach(n=>{
+    const el=document.createElement('div'); el.className='nota-cuidado';
+    el.innerHTML=`${escapeHtml(n.txt||'')}<small>${new Date(n.at).toLocaleDateString('pt-BR')}${n.por?' · '+escapeHtml(n.por):''}</small>`;
+    corpo.appendChild(el);
+  });
+  const addNota=document.createElement('button');
+  addNota.className='btn-app secundario';
+  addNota.innerHTML='<i class="fa-solid fa-pen"></i> Anotar um cuidado';
+  addNota.addEventListener('click',()=>{
+    const txt=prompt('O que você quer lembrar sobre '+(m.name||'esta pessoa')+'? (visita feita, pedido de oração, situação…)');
+    if(!txt||!txt.trim()) return;
+    m.notas=(m.notas||[]).concat([{at:Date.now(), txt:txt.trim(), por:primeiroNome()}]);
+    salvar('Anotado');
+  });
+  corpo.appendChild(addNota);
+
+  // --- ligação e papel ---
   const tv=document.createElement('div'); tv.className='secao-titulo'; tv.textContent='Ligação com a igreja'; corpo.appendChild(tv);
   const sel=document.createElement('select');
   sel.className='busca-membros';
   sel.innerHTML=Object.entries(ROTULO_VINCULO).map(([v,r])=>`<option value="${v}"${m.bond===v?' selected':''}>${r}</option>`).join('');
-  sel.addEventListener('change',()=>{
-    m.bond=sel.value;
-    salvarPerfil(m).then(()=>toast('Atualizado'));
-    renderAppView();
-  });
+  sel.addEventListener('change',()=>{ m.bond=sel.value; salvar('Atualizado'); });
   corpo.appendChild(sel);
 
+  if(ehPastor() && !souEu){
+    const tp=document.createElement('div'); tp.className='secao-titulo'; tp.textContent='Papel no app'; corpo.appendChild(tp);
+    const sp=document.createElement('select');
+    sp.className='busca-membros';
+    sp.innerHTML=['membro','voluntario','lider','tesoureira','pastor'].map(v=>`<option value="${v}"${papelDe(m)===v?' selected':''}>${PAPEIS[v]}</option>`).join('');
+    sp.addEventListener('change',()=>{
+      m.role=sp.value;
+      if(m.role==='voluntario'){
+        const min=prompt('Em qual ministério '+(m.name||'a pessoa')+' serve?\nEx.: '+MINISTERIOS_SUGERIDOS, m.ministerio||'');
+        m.ministerio=(min||'').trim();
+      } else if(m.role==='membro'){ m.ministerio=''; }
+      if(PAPEIS_EQUIPE.includes(m.role) && !AppState.church.pinHash) toast('Lembre de definir o PIN da equipe em Mais → Sua conta.');
+      salvar('Papel atualizado');
+    });
+    corpo.appendChild(sp);
+  }
+
+  // --- aulas ---
   const ta=document.createElement('div'); ta.className='secao-titulo';
   ta.textContent=`Aulas — ${pr.feitas} de ${pr.total}`; corpo.appendChild(ta);
-  if(!pr.etapas.length){ corpo.innerHTML+='<div class="vazio">Nenhuma aula cadastrada na jornada.</div>'; return; }
+  if(!pr.etapas.length){ const v=document.createElement('div'); v.className='vazio'; v.textContent='Nenhuma aula cadastrada na jornada.'; corpo.appendChild(v); return; }
 
   pr.etapas.forEach((e,i)=>{
     const feita=!!(pr.feito[e.id]&&pr.feito[e.id].done);
@@ -3682,7 +4071,6 @@ function telaMembro(corpo){
       else m.journeyProgress[e.id]={done:true, at:Date.now()};
       salvarPerfil(m).then(()=>{
         toast(feita?'Aula desmarcada':'Aula marcada como concluída');
-        // se for a própria pessoa, o app dela também acompanha
         if(AppState.member && AppState.member.uid===m.uid){
           AppState.member=m; AppState.journeyProgress=m.journeyProgress; salvarProgressoJornada();
         }
@@ -3691,6 +4079,14 @@ function telaMembro(corpo){
     });
     corpo.appendChild(el);
   });
+
+  if(k.datas.length){
+    const th=document.createElement('div'); th.className='secao-titulo'; th.textContent='Presenças recentes'; corpo.appendChild(th);
+    const p=document.createElement('p');
+    p.style.cssText='font-size:12.5px;color:var(--text-dim);line-height:1.8;';
+    p.textContent=k.datas.slice(-10).reverse().map(d=>d.split('-').reverse().slice(0,2).join('/')).join('  ·  ');
+    corpo.appendChild(p);
+  }
 }
 
 /* ---------- Jornada de crescimento ----------
@@ -3863,6 +4259,41 @@ function telaInicio(corpo){
   ola.style.cssText='font-size:14px;color:var(--text-dim);margin:0 2px 12px;';
   ola.textContent = primeiroNome() ? ('Olá, '+primeiroNome()) : '';
   if(primeiroNome()) corpo.appendChild(ola);
+
+  if(hojeTemEncontro()){
+    const pres=document.createElement('div');
+    pres.className='card';
+    if(jaFezCheckinHoje()){
+      pres.innerHTML='<div style="display:flex;align-items:center;gap:10px;"><i class="fa-solid fa-circle-check" style="color:#5ad67a;font-size:20px;"></i><div><h3 style="font-size:15px;">Presença confirmada hoje</h3><p style="margin-top:2px;">Que bom ter você aqui.</p></div></div>';
+    } else {
+      pres.innerHTML='<h3 style="font-size:16px;margin-bottom:8px;">Você está aqui hoje?</h3>';
+      const bt=document.createElement('button');
+      bt.className='btn-app'; bt.style.marginTop='0';
+      bt.innerHTML='<i class="fa-solid fa-hand"></i> Cheguei hoje';
+      bt.addEventListener('click',()=>{ bt.disabled=true; fazerCheckin(); });
+      pres.appendChild(bt);
+    }
+    corpo.appendChild(pres);
+  }
+
+  if(ehEquipe()){
+    const av=document.createElement('div');
+    av.className='card'; av.style.cursor='pointer';
+    if(garantirPessoas()){
+      const g=gruposDeAtencao(AppState.membros), n=totalAtencao(g), niver=g.aniversarios.length;
+      av.innerHTML=n||niver
+        ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim);">Pessoas</div>
+           <h3 style="font-size:17px;margin-top:4px;">${n?n+' pedem um cuidado':'Tudo em dia'}${niver?' · '+niver+' aniversário'+(niver>1?'s':'')+' na semana':''}</h3>
+           <p style="margin-top:4px;">${g.visitantes.length?g.visitantes.length+' visitante(s) não voltaram. ':''}${g.sumidos.length?g.sumidos.length+' sumiram. ':''}${g.parados.length?g.parados.length+' parados na jornada.':''}</p>`
+        : `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim);">Pessoas</div>
+           <h3 style="font-size:17px;margin-top:4px;">Tudo em dia</h3><p style="margin-top:4px;">${AppState.membros.length} pessoas, ninguém precisando de atenção agora.</p>`;
+    } else {
+      av.innerHTML='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim);">Pessoas</div><p style="margin-top:6px;">Carregando…</p>';
+    }
+    av.addEventListener('click',()=>abrirAppView('membros'));
+    corpo.appendChild(av);
+  }
+
   const hero=document.createElement('div');
   hero.className='card destaque';
   hero.innerHTML = prox
@@ -4181,9 +4612,9 @@ function telaMais(corpo){
   const mb=document.createElement('div');
   mb.className='item-lista'; mb.style.cursor='pointer';
   mb.innerHTML=`<div class="data-bloco" style="min-width:44px;padding:11px;"><i class="fa-solid fa-users" style="color:var(--marca);font-size:16px;"></i></div>
-    <div class="corpo"><div class="t">Membros</div><div class="s">Quem é quem e em que aula cada um está</div></div>
+    <div class="corpo"><div class="t">Pessoas</div><div class="s">Quem está onde: visitantes, discipulado, servindo</div></div>
     <i class="fa-solid fa-chevron-right" style="color:var(--text-dim);font-size:12px;align-self:center;"></i>`;
-  mb.addEventListener('click',()=>{ AppState.membros=null; abrirAppView('membros'); });
+  mb.addEventListener('click',()=>{ AppState.pessoasCarregadasEm=0; abrirAppView('membros'); });
   corpo.appendChild(mb);
   const ops=document.createElement('div');
   ops.className='item-lista'; ops.style.cursor='pointer';
@@ -4686,7 +5117,9 @@ document.getElementById('btn-modo-equipe').style.opacity = AppState.modoEquipe ?
 // ?area=app / ?area=operacao força a área e já regrava no localStorage deste
 // aparelho — resolve o caso de um navegador que ficou "preso" na tela de
 // projeção depois de alguém ter clicado "Sou da equipe" nele antes.
-const areaForcada = urlParams.get('area');
+const veioPeloQR = urlParams.get('presenca')==='1';
+AppState.presencaPendente = veioPeloQR;
+const areaForcada = urlParams.get('area') || (veioPeloQR ? 'app' : null);
 if(areaForcada==='app' || areaForcada==='operacao') localStorage.setItem('holyrics_area', areaForcada);
 AppState.area = isTvMode ? 'operacao' : (areaForcada || localStorage.getItem('holyrics_area') || 'app');
 if(isTvMode){
