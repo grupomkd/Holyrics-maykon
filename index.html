@@ -1024,6 +1024,7 @@ async function initTvMode(){
     document.documentElement.requestFullscreen().catch(()=>{}).finally(revisarTelaCheia);
     document.getElementById('display-start').classList.remove('show');
     document.getElementById('projection-overlay').classList.add('show');
+    setTimeout(reajustarTextosDaTela, 120);
     setTimeout(revisarTelaCheia, 300);
   });
 }
@@ -5130,10 +5131,36 @@ function applyBackground(bgEl, videoEl, dimEl, theme, blackout){
   else if(t==='anim2') bgEl.classList.add('bg-anim-2');
 }
 
+/* Texto longo (versículo com vários versos, parágrafo de pregação) não pode
+   estourar a tela: o tamanho do tema é o máximo, e a fonte encolhe só o
+   suficiente para o bloco caber. Sem isso o começo e a referência saíam
+   cortados no telão. */
+function ajustarTextoAoEspaco(el){
+  const base=Number(el.dataset.fonteBase);
+  const pai=el.parentElement;
+  if(!base || !pai || !pai.clientHeight) return;   // overlay escondido: refaz quando aparecer
+  const limite=pai.clientHeight*(el.id==='preview-text-el' ? 0.98 : 0.88);
+  let tam=base;
+  el.style.fontSize=tam+'px';
+  for(let i=0; i<40 && el.offsetHeight>limite && tam>base*0.35; i++){
+    tam*=0.94;
+    el.style.fontSize=tam+'px';
+  }
+}
+function reajustarTextosDaTela(){
+  ['preview-text-el','projection-text'].forEach(id=>{ const el=document.getElementById(id); if(el) ajustarTextoAoEspaco(el); });
+}
+window.addEventListener('resize', debounce(reajustarTextosDaTela,150));
+
 function applyThemeToEl(el,bgEl,theme,fontScale){
   fontScale = fontScale || 1;
   el.style.fontFamily=theme.font.family;
   el.style.fontSize=(theme.font.size*fontScale)+'px';
+  if(el.id==='preview-text-el' || el.id==='projection-text'){
+    el.dataset.fonteBase=String(theme.font.size*fontScale);
+    // o texto novo só entra no próximo quadro (ver setSlideText), então mede depois dele
+    requestAnimationFrame(()=>requestAnimationFrame(()=>ajustarTextoAoEspaco(el)));
+  }
   el.style.color=theme.font.color;
   el.style.fontWeight=theme.font.bold?'700':'400';
   el.style.fontStyle=theme.font.italic?'italic':'normal';
@@ -5329,6 +5356,8 @@ function goPrevSlide(){
 document.getElementById('present-btn').addEventListener('click',()=>{
   document.getElementById('projection-overlay').classList.add('show');
   updatePreview();
+
+  setTimeout(reajustarTextosDaTela,60);
 });
 document.getElementById('projection-overlay').addEventListener('dblclick',()=>{
   document.getElementById('projection-overlay').classList.remove('show');
