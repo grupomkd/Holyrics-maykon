@@ -1141,6 +1141,7 @@ const AppState = {
   activeMediaId: null,
   sermons: [],
   currentSermonId: null,
+  sermonBibleOpen: false, sermonBibleVersion: 'nvi',  // painel de versículo dentro da pregação
   sermonSlides: {},      // slideId -> dataUrl, carregado sob demanda
   liveSermonItemId: null, // qual item da pregação está na tela
   sermonImage: null,      // dataUrl da imagem no ar, se houver
@@ -2853,6 +2854,64 @@ async function importarPdfComoSlides(file, sermon, aoProgredir){
   return novos;
 }
 
+/* ---------- Versículo direto na pregação ----------
+   Digita "João 3:16" (ou "1 co 13:4-7", "sl 23:1-3"), o texto vem da mesma
+   Bíblia da aba Bíblia e já entra na sequência, pronto para projetar. */
+function semAcento(t){
+  return String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+}
+const ALIAS_LIVROS={ salmo:'ps', cantares:'so', canticos:'so', cantico:'so', proverbio:'prv', apocalipse:'re', revelacao:'re' };
+function acharLivroBiblico(txt){
+  const limpo=String(txt||'').replace(/\./g,'').trim().toLowerCase();
+  const compacto=limpo.replace(/\s+/g,'');
+  const compSem=semAcento(compacto);
+  if(!compSem) return {erro:'Escreva o livro, por exemplo João.'};
+  // 1) abreviação/nome idêntico respeitando acento: "jo" é João, "jó" é Jó
+  let l=bibleBookList.find(b=>b.short.toLowerCase()===compacto || b.name.toLowerCase().replace(/\s+/g,'')===compacto);
+  if(l) return {livro:l};
+  // 2) idêntico sem acento, id ou apelido conhecido
+  l=bibleBookList.find(b=>semAcento(b.short)===compSem || semAcento(b.name).replace(/\s+/g,'')===compSem || b.id===compSem);
+  if(l) return {livro:l};
+  const alias=ALIAS_LIVROS[compSem];
+  if(alias) return {livro:bibleBookList.find(b=>b.id===alias)};
+  // 3) começo do nome ("gen", "apoc", "1 cor")
+  if(compSem.length>=2){
+    const cand=bibleBookList.filter(b=>semAcento(b.name).replace(/\s+/g,'').startsWith(compSem));
+    if(cand.length===1) return {livro:cand[0]};
+    if(cand.length>1) return {erro:'Qual livro? '+cand.slice(0,4).map(b=>b.name).join(', ')+'…'};
+  }
+  return {erro:'Não conheci o livro "'+txt.trim()+'".'};
+}
+function interpretarReferencia(txt){
+  const m=String(txt||'').trim().match(/^(.+?)\s+(\d{1,3})\s*[:.,]\s*(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?$/);
+  if(!m) return {erro:'Use o formato Livro capítulo:versículo, por exemplo João 3:16 ou Salmos 23:1-3.'};
+  const r=acharLivroBiblico(m[1]);
+  if(r.erro) return r;
+  const ini=Number(m[3]), fim=m[4]?Number(m[4]):ini;
+  if(fim<ini) return {erro:'O versículo final vem antes do inicial.'};
+  if(fim-ini>11) return {erro:'Muitos versículos de uma vez (máximo 12). Divida em dois itens.'};
+  return {livro:r.livro, cap:Number(m[2]), ini, fim};
+}
+async function buscarVersiculos(txt, versao){
+  const r=interpretarReferencia(txt);
+  if(r.erro) throw new Error(r.erro);
+  let dados;
+  try{ dados=await fetchBibleBook(versao, r.livro.id); }
+  catch(e){ throw new Error('Não consegui baixar a Bíblia agora. Confira a internet.'); }
+  const cap=dados.chapters[r.cap-1];
+  if(!cap) throw new Error(r.livro.name+' só tem '+dados.chapters.length+' capítulos.');
+  const partes=[];
+  for(let v=r.ini; v<=r.fim; v++){
+    if(!cap[v-1]) { if(v===r.ini) throw new Error(r.livro.name+' '+r.cap+' só vai até o versículo '+cap.length+'.'); break; }
+    partes.push(String(cap[v-1]).trim());
+  }
+  const ultimo=r.ini+partes.length-1;
+  const texto = partes.length===1 ? partes[0]
+    : partes.map((t,i)=>(r.ini+i)+' '+t).join(' ');
+  const ref=`${r.livro.name} ${r.cap}:${r.ini}${ultimo>r.ini?'-'+ultimo:''}`;
+  return {ref, text:texto};
+}
+
 function renderSermonLeft(container){
   const wrap=document.createElement('div');
   wrap.innerHTML=`<button class="btn accent sm" id="new-sermon-btn" style="width:100%;margin-bottom:10px;"><i class="fa-solid fa-plus"></i> Nova pregação</button>
@@ -2900,6 +2959,20 @@ function renderSermonCenter(container){
       <input type="file" id="sm-video-input" accept="video/*" class="hidden">
     </div>
     <div id="sm-progress" class="empty-hint hidden" style="margin-bottom:8px;"></div>
+    <div id="sm-bible-panel" class="${AppState.sermonBibleOpen?'':'hidden'}" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:12px;">
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="field" style="flex:1;min-width:200px;margin:0;"><label>Versículo — ex.: João 3:16 · Sl 23:1-3 · 1 Co 13:4-7</label>
+          <input id="sm-bible-ref" placeholder="Livro capítulo:versículo" autocomplete="off"></div>
+        <div class="field" style="width:96px;margin:0;"><label>Versão</label>
+          <select id="sm-bible-ver">${bibleVersions.map(v=>`<option value="${v.id}"${(AppState.sermonBibleVersion||'nvi')===v.id?' selected':''}>${v.id.toUpperCase()}</option>`).join('')}</select></div>
+      </div>
+      <div id="sm-bible-preview" class="empty-hint" style="text-align:left;padding:10px 2px;min-height:18px;"></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;">
+        <button class="btn" id="sm-bible-add"><i class="fa-solid fa-plus"></i> Adicionar</button>
+        <button class="btn accent" id="sm-bible-play"><i class="fa-solid fa-play"></i> Adicionar e projetar</button>
+        <button class="btn ghost" id="sm-bible-close">Fechar</button>
+      </div>
+    </div>
     <div class="panel-header" style="padding-left:0;border:none;">Sequência (${(sermon.items||[]).length}) — arraste para reordenar</div>
     <div id="sermon-items"></div>
     <div class="row" style="margin-top:14px;">
@@ -2957,13 +3030,52 @@ function renderSermonCenter(container){
     if(!AppState.songs[idx]) return;
     acrescentar([{id:uid(), type:'song', songId:AppState.songs[idx].id, title:AppState.songs[idx].title}]);
   });
+  const painelB=q('#sm-bible-panel'), refB=q('#sm-bible-ref'), verB=q('#sm-bible-ver'), prevB=q('#sm-bible-preview');
+  let achado=null;
+  const atualizarPrevia=debounce(async ()=>{
+    achado=null;
+    const txt=refB.value.trim();
+    if(!txt){ prevB.textContent=''; return; }
+    prevB.style.color='var(--text-dim)'; prevB.textContent='Buscando…';
+    const meu=txt+'|'+verB.value;
+    try{
+      const r=await buscarVersiculos(txt, verB.value);
+      if(refB.value.trim()+'|'+verB.value!==meu) return;
+      achado=r;
+      prevB.style.color='var(--text)';
+      prevB.innerHTML='<strong>'+escapeHtml(r.ref)+'</strong> — '+escapeHtml(r.text)
+        +(r.text.length>450?'<div style="color:#e0a85c;margin-top:4px;">Texto longo: pode ficar pequeno na tela. Se preferir, divida em dois itens.</div>':'');
+    }catch(err){
+      if(refB.value.trim()+'|'+verB.value!==meu) return;
+      prevB.style.color='#e0a85c'; prevB.textContent=err.message;
+    }
+  }, 350);
   q('#sm-bible-btn').addEventListener('click',()=>{
-    const ref=prompt('Referência (ex.: João 3:16) — só para você se achar na lista:','');
-    if(ref===null) return;
-    const texto=prompt('Cole aqui o texto do versículo:','');
-    if(texto===null || !texto.trim()) return;
-    acrescentar([{id:uid(), type:'bible', ref:(ref||'').trim(), text:texto.trim()}]);
+    AppState.sermonBibleOpen=!AppState.sermonBibleOpen;
+    painelB.classList.toggle('hidden',!AppState.sermonBibleOpen);
+    if(AppState.sermonBibleOpen) refB.focus();
   });
+  q('#sm-bible-close').addEventListener('click',()=>{ AppState.sermonBibleOpen=false; painelB.classList.add('hidden'); });
+  refB.addEventListener('input',atualizarPrevia);
+  verB.addEventListener('change',()=>{ AppState.sermonBibleVersion=verB.value; atualizarPrevia(); });
+  const adicionarVersiculo=async (projetar)=>{
+    const txt=refB.value.trim();
+    if(!txt){ refB.focus(); return; }
+    let r=achado;
+    if(!r){
+      try{ r=await buscarVersiculos(txt, verB.value); }
+      catch(err){ prevB.style.color='#e0a85c'; prevB.textContent=err.message; return; }
+    }
+    const item={id:uid(), type:'bible', ref:r.ref, text:r.text, version:verB.value};
+    AppState.sermonBibleVersion=verB.value;
+    acrescentar([item]);   // redesenha a tela já com o painel aberto e vazio, pronto pro próximo versículo
+    if(projetar) projetarItemPregacao(sermon, sermon.items.length-1);
+    else toast(r.ref+' adicionado');
+    const novo=document.getElementById('sm-bible-ref'); if(novo) novo.focus();
+  };
+  q('#sm-bible-add').addEventListener('click',()=>adicionarVersiculo(false));
+  q('#sm-bible-play').addEventListener('click',()=>adicionarVersiculo(true));
+  refB.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); adicionarVersiculo(e.shiftKey); } });
 
   q('#sm-img-btn').addEventListener('click',()=>q('#sm-img-input').click());
   q('#sm-img-input').addEventListener('change',async e=>{
@@ -3138,7 +3250,10 @@ function rotuloItemPregacao(it){
   if(it.type==='video') return (it.name || 'Vídeo') + (String(it.url||'').startsWith('local:') ? '  · só neste computador' : '');
   if(it.type==='text')  return (it.text||'').split('\n')[0].slice(0,60) || '(texto vazio)';
   if(it.type==='song'){ const s=AppState.songs.find(x=>x.id===it.songId); return s? s.title : (it.title||'(música removida)'); }
-  if(it.type==='bible') return it.ref || 'Versículo';
+  if(it.type==='bible'){
+    const trecho=(it.text||'').replace(/\s+/g,' ').slice(0,48);
+    return (it.ref||'Versículo')+(trecho?' — '+trecho+((it.text||'').length>48?'…':''):'');
+  }
   return it.type;
 }
 const ICONE_ITEM={image:'fa-image', video:'fa-film', text:'fa-align-left', song:'fa-music', bible:'fa-book-bible'};
