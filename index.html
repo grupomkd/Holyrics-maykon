@@ -189,6 +189,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
   background:var(--primary);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;
   display:inline-flex;align-items:center;gap:6px;
 }
+a.btn{text-decoration:none;}
 .btn:hover{background:#144a86;}
 .btn.accent{background:var(--accent);}
 .btn.accent:hover{background:var(--accent-2);}
@@ -624,6 +625,7 @@ body.area-app button:focus-visible,body.area-app a:focus-visible,body.area-app i
   <button class="tab-btn" data-view="playlist"><i class="fa-solid fa-list-check"></i> Playlist</button>
   <button class="tab-btn" data-view="luz"><i class="fa-solid fa-lightbulb"></i> Luz</button>
   <button class="tab-btn" data-view="cronograma"><i class="fa-solid fa-list-check"></i> Cronograma</button>
+  <button class="tab-btn" data-view="links"><i class="fa-solid fa-link"></i> Links</button>
   <div id="topbar-spacer"></div>
   <span id="sync-status" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding:0 10px;">
     <span id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
@@ -715,6 +717,7 @@ body.area-app button:focus-visible,body.area-app a:focus-visible,body.area-app i
   <button class="bt-item" data-view="playlist"><i class="fa-solid fa-list-check"></i><span>Playlist</span></button>
   <button class="bt-item" data-view="luz"><i class="fa-solid fa-lightbulb"></i><span>Luz</span></button>
   <button class="bt-item" data-view="cronograma"><i class="fa-solid fa-list-check"></i><span>Cronograma</span></button>
+  <button class="bt-item" data-view="links"><i class="fa-solid fa-link"></i><span>Links</span></button>
   <button class="bt-item" data-pane="right"><i class="fa-solid fa-tv"></i><span>Ao Vivo</span></button>
   <button class="bt-item" data-view="themes"><i class="fa-solid fa-palette"></i><span>Temas</span></button>
 </div>
@@ -845,6 +848,7 @@ const devotionalsCollRef = collection(db,'holyrics_devotionals');
 const churchDocRef       = doc(db,'holyrics_data','church');
 const journeyCollRef     = collection(db,'holyrics_journey');
 const cronogramasCollRef = collection(db,'holyrics_cronogramas');
+const linksCollRef       = collection(db,'holyrics_links');
 const membersCollRef     = collection(db,'holyrics_members');
 const accountsCollRef    = collection(db,'holyrics_accounts');
 const presencasCollRef   = collection(db,'holyrics_presencas');
@@ -1098,6 +1102,11 @@ async function initCloudSync(){
     AppState.cronogramas = snap.docs.map(d=>d.data());
     if(AppState.view==='cronograma') renderView();
   });
+  onSnapshot(linksCollRef, {includeMetadataChanges:true}, snap=>{
+    if(snap.metadata.hasPendingWrites) return;
+    AppState.links = snap.docs.map(d=>d.data());
+    if(AppState.view==='links') renderView();
+  });
   // Mac e celular seguem o mesmo estado ao vivo: quem clicar em qualquer um
   // dos dois manda na tela, e o outro acompanha em vez de brigar
   onSnapshot(liveDocRef, snap=>{
@@ -1156,6 +1165,7 @@ const AppState = {
   journeyStepId: null,
   luzStatus: 'verificando',  // 'verificando' | 'ok' | 'indisponivel'
   luzEquipamentos: [],       // vem de GET /lights do daemon local
+  links: [], currentLinkId: null,   // atalhos (Spotify, YouTube…) para abrir rápido
   cronogramas: [], currentCronogramaId: null,  // agenda interna do culto — nunca projetada
   membros: null, membroAberto: null, buscaMembro:'', filtroMembro:'todos',
   presencas: [], presencasCarregadas: 0, presencaPendente: false,
@@ -1340,7 +1350,7 @@ function setMobilePane(pane){
   const backBtn=document.getElementById('mobile-back-btn');
   const titleEl=document.getElementById('mobile-title');
   if(backBtn) backBtn.classList.toggle('show', pane==='center');
-  const titles={bible:'Bíblia',songs:'Músicas',themes:'Temas',playlist:'Playlist',sermon:'Pregação'};
+  const titles={bible:'Bíblia',songs:'Músicas',themes:'Temas',playlist:'Playlist',sermon:'Pregação',links:'Links'};
   if(titleEl) titleEl.textContent = pane==='right' ? 'Ao Vivo' : (titles[AppState.view]||'');
   document.querySelectorAll('.bt-item').forEach(b=>{
     const isActive = pane==='right' ? b.dataset.pane==='right' : (b.dataset.view===AppState.view && AppState.mobileActiveTab!=='right');
@@ -1356,6 +1366,7 @@ function updateMobilePaneAuto(){
   else if(AppState.view==='playlist') hasDetail=!!AppState.currentPlaylistId;
   else if(AppState.view==='sermon') hasDetail=!!AppState.currentSermonId;
   else if(AppState.view==='themes') hasDetail=!!AppState.editingThemeId;
+  else if(AppState.view==='links') hasDetail=!!AppState.currentLinkId;
   setMobilePane(hasDetail?'center':'left');
 }
 function clearCurrentDetail(){
@@ -1364,6 +1375,7 @@ function clearCurrentDetail(){
   else if(AppState.view==='playlist'){ AppState.currentPlaylistId=null; }
   else if(AppState.view==='sermon'){ AppState.currentSermonId=null; }
   else if(AppState.view==='themes'){ AppState.editingThemeId=null; }
+  else if(AppState.view==='links'){ AppState.currentLinkId=null; }
 }
 document.getElementById('mini-live').addEventListener('click',()=>{
   AppState.mobileActiveTab='right';
@@ -1445,6 +1457,11 @@ function renderView(){
     centerHeader.textContent='Ordem do culto';
     renderCronogramaLeft(leftBody);
     renderCronogramaCenter(centerBody);
+  } else if(AppState.view==='links'){
+    leftHeader.textContent='Links';
+    centerHeader.textContent='Abrir e ouvir';
+    renderLinksLeft(leftBody);
+    renderLinksCenter(centerBody);
   }
   renderThemeSelect();
   updateMobilePaneAuto();
@@ -2461,6 +2478,114 @@ function renderLuzCenter(container){
   });
 }
 
+
+/* =========================================================
+   LINKS — atalhos para abrir rápido (Spotify, YouTube…).
+   Cada link é um documento em holyrics_links e sincroniza entre
+   todos os aparelhos. Links do Spotify ganham um player embutido.
+   Isolado do resto: nada aqui toca em música, letra ou projeção.
+   ========================================================= */
+function spotifyDoLink(url){
+  const m=String(url||'').match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode|show|artist)\/([A-Za-z0-9]+)/);
+  return m ? {tipo:m[1], id:m[2]} : null;
+}
+// tira o rastreamento da URL e confere se é um endereço de verdade
+function normalizarLink(txt){
+  let t=String(txt||'').trim();
+  if(!t) return null;
+  if(!/^https?:\/\//i.test(t)) t='https://'+t;
+  try{ new URL(t); }catch(e){ return null; }
+  const sp=spotifyDoLink(t);
+  return sp ? {url:`https://open.spotify.com/${sp.tipo}/${sp.id}`} : {url:t};
+}
+async function tituloDoLink(url){
+  const sp=spotifyDoLink(url);
+  if(!sp){ try{ return new URL(url).hostname.replace(/^www\./,''); }catch(e){ return 'Link'; } }
+  try{
+    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),4000);
+    const r=await fetch('https://open.spotify.com/oembed?url='+encodeURIComponent(url),{signal:ctrl.signal});
+    clearTimeout(t);
+    if(r.ok){ const d=await r.json(); if(d && d.title) return d.title; }
+  }catch(e){ /* sem internet ou bloqueado: cai no nome genérico abaixo */ }
+  return {track:'Música',album:'Álbum',playlist:'Playlist',episode:'Episódio',show:'Podcast',artist:'Artista'}[sp.tipo]||'Spotify';
+}
+function salvarLink(l){ return setDoc(doc(linksCollRef,l.id), sanitizeForFirestore(l)).catch(()=>toast('Não consegui salvar o link.')); }
+function linkAtual(){ return AppState.links.find(l=>l.id===AppState.currentLinkId) || null; }
+function rotuloTipoLink(l){
+  const sp=spotifyDoLink(l.url);
+  if(sp) return 'Spotify · '+({track:'música',album:'álbum',playlist:'playlist',episode:'episódio',show:'podcast',artist:'artista'}[sp.tipo]||'');
+  try{ return new URL(l.url).hostname.replace(/^www\./,''); }catch(e){ return 'Link'; }
+}
+
+function renderLinksLeft(container){
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Colar link (Spotify, YouTube…) — pode colar vários</label>
+      <textarea id="lk-url" placeholder="https://open.spotify.com/track/…" style="min-height:64px;"></textarea></div>
+    <div class="field"><label>Nome (opcional — o Spotify preenche sozinho)</label>
+      <input id="lk-nome" placeholder="Ex.: Música de entrada" autocomplete="off"></div>
+    <button class="btn accent sm" id="lk-add" style="width:100%;margin-bottom:14px;"><i class="fa-solid fa-plus"></i> Adicionar</button>
+    <div id="lk-lista"></div>`;
+  container.appendChild(wrap);
+
+  wrap.querySelector('#lk-add').addEventListener('click',async ()=>{
+    const campo=wrap.querySelector('#lk-url');
+    const pedacos=campo.value.split(/\s+/).filter(Boolean);
+    if(!pedacos.length){ campo.focus(); return; }
+    const validos=pedacos.map(normalizarLink).filter(Boolean);
+    if(!validos.length){ toast('Isso não parece um link.'); return; }
+    const btn=wrap.querySelector('#lk-add'); btn.disabled=true; btn.textContent='Adicionando…';
+    const nomeDigitado=wrap.querySelector('#lk-nome').value.trim();
+    let ultimo=null;
+    for(let i=0;i<validos.length;i++){
+      const titulo=(validos.length===1 && nomeDigitado) ? nomeDigitado : await tituloDoLink(validos[i].url);
+      const l={id:uid(), title:titulo, url:validos[i].url, createdAt:Date.now()+i};
+      AppState.links.push(l); salvarLink(l); ultimo=l;
+    }
+    AppState.currentLinkId=ultimo.id;
+    toast(validos.length>1 ? validos.length+' links adicionados' : 'Link adicionado');
+    renderView();
+  });
+
+  const lista=wrap.querySelector('#lk-lista');
+  const todos=AppState.links.slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  if(!todos.length) lista.innerHTML='<div class="empty-hint">Nenhum link ainda. Cole um acima.</div>';
+  todos.forEach(l=>{
+    const item=document.createElement('div');
+    item.className='song-item'+(AppState.currentLinkId===l.id?' selected':'');
+    item.style.cssText='display:flex;align-items:center;gap:8px;';
+    item.innerHTML=`<div style="flex:1;min-width:0;"><div class="t">${escapeHtml(l.title||'(sem nome)')}</div><div class="a">${escapeHtml(rotuloTipoLink(l))}</div></div>
+      <a class="btn sm accent" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" title="Abrir em outra aba"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>`;
+    item.querySelector('a').addEventListener('click',e=>e.stopPropagation());
+    item.addEventListener('click',()=>{ AppState.currentLinkId=l.id; renderView(); });
+    lista.appendChild(item);
+  });
+}
+
+function renderLinksCenter(container){
+  const l=linkAtual();
+  if(!l){ container.innerHTML='<div class="empty-hint">Escolha um link à esquerda para ouvir aqui, ou toque no ícone ao lado dele para abrir em outra aba.</div>'; return; }
+  const sp=spotifyDoLink(l.url);
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`
+    <div class="field"><label>Nome</label><input id="lk-titulo" value="${escapeHtml(l.title||'')}"></div>
+    <div class="row" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <a class="btn accent" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir${sp?' no Spotify':''}</a>
+      <button class="btn ghost" id="lk-copiar"><i class="fa-solid fa-copy"></i> Copiar link</button>
+      <button class="btn ghost" id="lk-del" style="background:#3a1622;"><i class="fa-solid fa-trash"></i> Remover</button>
+    </div>
+    ${sp?`<iframe title="Player do Spotify" src="https://open.spotify.com/embed/${sp.tipo}/${sp.id}?utm_source=generator&theme=0" width="100%" height="${sp.tipo==='track'||sp.tipo==='episode'?152:352}" frameborder="0" loading="lazy" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" style="border-radius:12px;border:0;"></iframe>
+      <div class="empty-hint" style="text-align:left;padding:8px 2px;">Se você estiver logado no Spotify neste navegador, toca a música inteira. Sem login, toca só uma prévia.</div>`:''}`;
+  container.appendChild(wrap);
+  wrap.querySelector('#lk-titulo').addEventListener('input',e=>{ l.title=e.target.value; salvarLink(l); });
+  wrap.querySelector('#lk-copiar').addEventListener('click',()=>{ navigator.clipboard.writeText(l.url).then(()=>toast('Link copiado'),()=>toast(l.url)); });
+  wrap.querySelector('#lk-del').addEventListener('click',()=>{
+    if(!confirm('Remover "'+(l.title||'este link')+'"?')) return;
+    deleteDoc(doc(linksCollRef,l.id)).catch(()=>{});
+    AppState.links=AppState.links.filter(x=>x.id!==l.id);
+    AppState.currentLinkId=null; renderView();
+  });
+}
 
 /* =========================================================
    CRONOGRAMA — ordem do culto, só pra referência do operador.
