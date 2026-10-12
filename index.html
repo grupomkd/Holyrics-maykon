@@ -2257,16 +2257,23 @@ document.getElementById('media-video-input').addEventListener('change',async (e)
     toast('Vídeo pronto. Ele fica só neste computador.');
   }catch(err){ console.error(err); toast('Não consegui guardar esse vídeo aqui.'); }
 });
-document.getElementById('media-file-input').addEventListener('change',(e)=>{
-  [...e.target.files].forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const item={id:uid(), name:file.name, dataUrl:ev.target.result};
+// A imagem vai dentro do documento do Firestore (limite de 1MB), então ela é
+// reduzida antes de salvar. Sem isso, qualquer arquivo maior que uns 700KB era
+// recusado pelo banco: aparecia na tela por alguns segundos e depois sumia.
+document.getElementById('media-file-input').addEventListener('change',async (e)=>{
+  const arquivos=[...e.target.files]; e.target.value='';
+  for(const file of arquivos){
+    try{
+      const dataUrl=await comprimirImagem(await lerArquivoComoDataUrl(file), 1920);
+      const item={id:uid(), name:file.name, dataUrl};
       AppState.media.push(item);
       saveMediaCloud(item); saveState(); renderMediaPanel();
-    };
-    reader.readAsDataURL(file);
-  });
+      toast('"'+file.name+'" adicionada');
+    }catch(err){
+      console.error('imagem da mídia:', err);
+      toast('Não consegui usar "'+file.name+'": '+(err.message||'arquivo inválido')+'.');
+    }
+  }
 });
 
 function renderThemeSelect(){
@@ -2862,11 +2869,11 @@ function canvasParaDataUrl(c){
   }
   return canvas.toDataURL('image/jpeg',0.45);
 }
-function comprimirImagem(fonte){
+function comprimirImagem(fonte, larguraMax){
   return new Promise((resolve,reject)=>{
     const img=new Image();
     img.onload=()=>{
-      const escala=Math.min(1, SERMAO_LARGURA_MAX/img.width);
+      const escala=Math.min(1, (larguraMax||SERMAO_LARGURA_MAX)/img.width);
       const c=document.createElement('canvas');
       c.width=Math.max(1,Math.round(img.width*escala));
       c.height=Math.max(1,Math.round(img.height*escala));
