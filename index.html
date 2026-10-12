@@ -691,6 +691,22 @@ body.area-app button:focus-visible,body.area-app a:focus-visible,body.area-app i
         <button id="tr-next" title="Próximo slide (→)"><i class="fa-solid fa-forward-step"></i></button>
       </div>
       <div id="slide-strip" style="display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:4px;"></div>
+      <div id="voz-painel" style="margin-top:12px;">
+        <button class="btn ghost sm" id="voz-btn" style="width:100%;"><i class="fa-solid fa-microphone"></i> Acompanhar por voz</button>
+        <div id="voz-detalhes" class="hidden" style="margin-top:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;">
+            <input type="checkbox" id="voz-auto" checked> Mudar a tela sozinho
+          </label>
+          <div id="voz-status" style="font-weight:600;margin-bottom:4px;"></div>
+          <div id="voz-ouvido" style="color:var(--text-dim);min-height:15px;margin-bottom:6px;word-break:break-word;"></div>
+          <div id="voz-musica" style="margin-bottom:6px;"></div>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer;color:var(--text-dim);">Testar sem microfone</summary>
+            <input id="voz-teste" placeholder="Digite um trecho da letra e Enter" style="width:100%;margin-top:6px;" autocomplete="off">
+          </details>
+          <div style="color:var(--text-dim);margin-top:8px;line-height:1.5;">Funciona melhor no Chrome, com internet e com o microfone perto da voz de quem canta (no Mac, escolha a entrada em Ajustes › Som).</div>
+        </div>
+      </div>
       <div style="margin-top:14px;">
         <div class="panel-header" style="padding:0 0 8px 0;border:none;">Tema aplicado</div>
         <select id="theme-select" style="width:100%;"></select>
@@ -2293,6 +2309,427 @@ function renderThemeSelect(){
   };
 }
 
+
+
+/* =========================================================
+   ACOMPANHAR POR VOZ
+   O microfone fica ligado e o app compara o que ouve com as letras
+   que já estão na biblioteca: acha a música, vira o slide quando a
+   pessoa chega nele e muda de música se ela começar outra. Nunca mexe
+   na tela quando tem aviso, imagem ou vídeo em tela cheia, e o clique
+   manual sempre vale mais do que o automático.
+   ========================================================= */
+/* VOZ-ENGINE-INICIO — acompanha a letra pelo que está sendo ouvido.
+   Não depende da tela: recebe texto, devolve a decisão. Funciona porque as
+   letras já estão no app: em vez de entender qualquer fala, só precisa dizer
+   qual slide de qual música mais combina com as últimas palavras ouvidas. */
+const VOZ_STOP = new Set(['que','com','uma','por','para','mas','pra','pois','como','nao','dos','das','aos','nas','nos','sua','seu','tua','teu','meu','minha','mais','sem','ele','ela','vou','foi','tem','ser','era','esse','essa','isso','quando','porque','onde','aqui','entre']);
+
+function vozNormalizar(txt){
+  return String(txt||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+function vozTokens(txt){
+  const n=vozNormalizar(txt);
+  if(!n) return [];
+  return n.split(' ').filter(t=>t.length>=3 && !VOZ_STOP.has(t));
+}
+function vozLev1(a,b,max){
+  // distância de edição limitada (devolve max+1 se passar do limite)
+  if(Math.abs(a.length-b.length)>max) return max+1;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    const cur=[i]; let menor=i;
+    for(let j=1;j<=b.length;j++){
+      const c=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      cur.push(c); if(c<menor) menor=c;
+    }
+    if(menor>max) return max+1;
+    prev=cur;
+  }
+  return prev[b.length];
+}
+
+function vozConstruirIndice(songs){
+  const slides=[];
+  const df=new Map();
+  (songs||[]).forEach(s=>{
+    (s.slides||[]).forEach((sl,idx)=>{
+      const toks=vozTokens(sl.text);
+      if(!toks.length) return;
+      const set=new Set(toks);
+      const bi=new Set();
+      for(let i=0;i<toks.length-1;i++) bi.add(toks[i]+' '+toks[i+1]);
+      const ref={songId:s.id, titulo:s.title||'', idx, tokens:set, bigramas:bi, n:toks.length};
+      slides.push(ref);
+      set.forEach(t=>df.set(t,(df.get(t)||0)+1));
+    });
+  });
+  const invertido=new Map();
+  slides.forEach(sl=>sl.tokens.forEach(t=>{
+    if(!invertido.has(t)) invertido.set(t,[]);
+    invertido.get(t).push(sl);
+  }));
+  const N=Math.max(1,slides.length);
+  const idf=new Map();
+  df.forEach((v,t)=>idf.set(t, Math.log(1+N/v)));
+  const porInicial=new Map();
+  df.forEach((v,t)=>{ const k=t[0]; if(!porInicial.has(k)) porInicial.set(k,[]); porInicial.get(k).push(t); });
+  return {slides, invertido, idf, df, porInicial, N, cacheCanon:new Map()};
+}
+
+// leva uma palavra ouvida (talvez com erro de reconhecimento) para a palavra
+// da letra que ela provavelmente é
+function vozCanonica(ind, w){
+  if(ind.idf.has(w)) return w;
+  if(ind.cacheCanon.has(w)) return ind.cacheCanon.get(w);
+  let achada=null;
+  if(w.length>=5){
+    const max = w.length>=9 ? 2 : 1;
+    const cands=ind.porInicial.get(w[0])||[];
+    let melhor=max+1;
+    for(const c of cands){
+      const d=vozLev1(w,c,max);
+      if(d<melhor){ melhor=d; achada=c; if(d===0) break; }
+    }
+    if(melhor>max) achada=null;
+  }
+  ind.cacheCanon.set(w,achada);
+  return achada;
+}
+
+function vozPontuar(ind, palavras){
+  // palavras: lista de tokens ouvidos, do mais antigo para o mais recente
+  const toks=palavras.map(w=>vozCanonica(ind,w));
+  const n=toks.length;
+  if(!n) return [];
+  const pesoDe=k=> n===1 ? 1 : 0.5+0.5*k/(n-1);
+  let massa=0, massaPar=0;
+  const uni=[], pares=[];
+  toks.forEach((t,k)=>{
+    if(!t) return;
+    const w=pesoDe(k)*ind.idf.get(t);
+    uni.push({t,w}); massa+=w;
+  });
+  for(let k=0;k<n-1;k++){
+    if(!toks[k]||!toks[k+1]) continue;
+    const w=pesoDe(k+1)*(ind.idf.get(toks[k])+ind.idf.get(toks[k+1]))/2;
+    pares.push({p:toks[k]+' '+toks[k+1], w}); massaPar+=w;
+  }
+  if(massa<=0) return [];
+  const candidatos=new Set();
+  uni.forEach(u=>(ind.invertido.get(u.t)||[]).forEach(s=>candidatos.add(s)));
+  const out=[];
+  candidatos.forEach(sl=>{
+    let a=0; uni.forEach(u=>{ if(sl.tokens.has(u.t)) a+=u.w; });
+    let b=0; pares.forEach(p=>{ if(sl.bigramas.has(p.p)) b+=p.w; });
+    const score=0.65*(a/massa)+0.35*(massaPar>0 ? b/massaPar : a/massa);
+    out.push({songId:sl.songId, titulo:sl.titulo, idx:sl.idx, score});
+  });
+  out.sort((x,y)=>y.score-x.score);
+  return out;
+}
+
+// letra de cada música como uma fila única de palavras, lembrando em que
+// slide cada palavra está: é nela que se acompanha "onde a pessoa está"
+function vozAplanar(songs){
+  const mapa=new Map();
+  (songs||[]).forEach(s=>{
+    const tokens=[], slideDe=[];
+    (s.slides||[]).forEach((sl,idx)=>{ vozTokens(sl.text).forEach(t=>{ tokens.push(t); slideDe.push(idx); }); });
+    if(tokens.length>=4) mapa.set(s.id,{tokens, slideDe, titulo:s.title||''});
+  });
+  return mapa;
+}
+
+// onde, perto de "pos", as últimas palavras ouvidas terminam de casar com a letra?
+// anda de trás para frente tolerando palavras faltando ou erradas (ruído)
+function vozAlinhar(flat, pal, de, ate, pos){
+  const n=pal.length;
+  let melhor={p:-1, score:0};
+  if(!n) return melhor;
+  const peso=k=> n===1 ? 1 : 0.4+0.6*k/(n-1);
+  let massa=0; pal.forEach((w,k)=>{ if(w) massa+=peso(k); });
+  if(massa<=0) return melhor;
+  // âncora: a última palavra ouvida tem de ser a palavra da letra onde o alinhamento
+  // termina. Sem isso o ponteiro "corre" alguns tokens à frente do cantor e o slide
+  // seguinte aparece antes de ele terminar a última linha do anterior
+  let ancora=null;
+  for(let k=n-1;k>=0;k--){ if(pal[k]){ ancora=pal[k]; break; } }
+  const pontos=[];
+  for(let p=Math.max(0,de); p<=Math.min(flat.tokens.length-1,ate); p++){
+    if(ancora && flat.tokens[p]!==ancora) continue;
+    let i=p, ganho=0;
+    for(let k=n-1;k>=0;k--){
+      const w=pal[k]; if(!w) continue;
+      let achou=-1;
+      for(let g=0; g<=3 && i-g>=0; g++){ if(flat.tokens[i-g]===w){ achou=i-g; break; } }
+      if(achou>=0){ ganho+=peso(k); i=achou-1; }
+    }
+    pontos.push({p, score:ganho/massa});
+  }
+  if(!pontos.length) return melhor;
+  const topo=Math.max(...pontos.map(x=>x.score));
+  if(topo<=0) return melhor;
+  // vários pontos quase iguais (refrão repetido): fica perto de onde estava;
+  // sem referência, fica com o primeiro, para não pular para uma repetição lá na frente
+  const empatados=pontos.filter(x=>x.score>=topo-0.04);
+  let esc;
+  if(pos>=0) esc=empatados.reduce((a,b)=>Math.abs(b.p-(pos+1))<Math.abs(a.p-(pos+1))?b:a);
+  else esc=empatados[0];
+  return {p:esc.p, score:esc.score, bruto:topo};
+}
+
+class SeguidorDeVoz{
+  constructor(songs, opc){
+    this.opc=Object.assign({
+      janela:10, minMusica:0.55, folgaMusica:0.12, minAlinha:0.55,
+      estabilidadeSlideMs:450, estabilidadeMusicaMs:1000, estabilidadeSaltoMs:1500,
+      minPalavras:3, avancoMax:45, recuoMax:4,
+    }, opc||{});
+    this.reindexar(songs);
+    this.finais=[]; this.parcial=[];
+    this.atual=null; this.pos=-1; this.proposta=null; this.ultimaLeitura=null;
+  }
+  reindexar(songs){
+    this.ind=vozConstruirIndice(songs); this.flat=vozAplanar(songs);
+    // cópias da mesma música (ex.: duas versões de "Tudo é pra Tua Glória"):
+    // trocar de uma para a outra no meio do canto só bagunçaria os slides
+    const conj=new Map(); this.flat.forEach((f,id)=>conj.set(id,new Set(f.tokens)));
+    this.similares=new Map();
+    const ids=[...conj.keys()];
+    ids.forEach(a=>{ const r=new Set(); ids.forEach(b=>{
+      if(a===b) return;
+      const A=conj.get(a), B=conj.get(b); let inter=0; A.forEach(t=>{ if(B.has(t)) inter++; });
+      if(inter/Math.min(A.size,B.size)>=0.85) r.add(b);
+    }); this.similares.set(a,r); });
+  }
+  definirAtual(songId, idx){
+    this.atual=songId?{songId, idx:idx||0}:null; this.proposta=null;
+    const f=songId?this.flat.get(songId):null;
+    this.pos = f ? Math.max(0, f.slideDe.indexOf(idx||0)-1) : -1;
+  }
+  parcialAtual(texto, agora){ this.parcial=vozTokens(texto); return this._avaliar(agora); }
+  confirmar(texto, agora){
+    this.finais=this.finais.concat(vozTokens(texto)).slice(-30);
+    this.parcial=[];
+    return this._avaliar(agora);
+  }
+  limpar(){ this.finais=[]; this.parcial=[]; this.proposta=null; }
+  _janela(){ return this.finais.concat(this.parcial).slice(-this.opc.janela); }
+  _propor(chave, tipo, alvo, agora, exigeMs, leitura){
+    if(!this.proposta || this.proposta.chave!==chave) this.proposta={chave, desde:agora};
+    if(agora-this.proposta.desde>=exigeMs){
+      this.atual={songId:alvo.songId, idx:alvo.idx};
+      this.pos=alvo.p;
+      this.proposta=null;
+      this.finais=this.finais.slice(-4); this.parcial=[];
+      leitura.decisao={tipo, songId:alvo.songId, titulo:alvo.titulo, idx:alvo.idx, score:alvo.score};
+    }
+  }
+  _avaliar(agora){
+    const o=this.opc, pal=this._janela();
+    const leitura={palavras:pal, melhor:null, decisao:null};
+    this.ultimaLeitura=leitura;
+    if(pal.length<o.minPalavras){ this.proposta=null; return leitura; }
+    const canon=pal.map(w=>vozCanonica(this.ind,w));
+    const lista=vozPontuar(this.ind, pal);          // visão geral: qual música é
+    const topo=lista[0]||null;
+    if(topo) leitura.melhor={songId:topo.songId, titulo:topo.titulo, idx:topo.idx, score:topo.score};
+
+    if(!this.atual){
+      if(topo && topo.score>=o.minMusica){
+        const f=this.flat.get(topo.songId);
+        if(f){
+          const al=vozAlinhar(f, canon, 0, f.tokens.length-1, -1);
+          if(al.p>=0 && al.score>=o.minAlinha){
+            const alvo={songId:topo.songId, titulo:topo.titulo, idx:f.slideDe[al.p], p:al.p, score:al.score};
+            this._propor('musica:'+alvo.songId+':'+alvo.idx,'musica',alvo,agora,o.estabilidadeMusicaMs,leitura);
+            return leitura;
+          }
+        }
+      }
+      this.proposta=null; return leitura;
+    }
+
+    const f=this.flat.get(this.atual.songId);
+    const topoAtual=lista.find(c=>c.songId===this.atual.songId);
+    // 1) trocou de música? outra letra combina bem mais do que a atual
+    const parecida=this.similares.get(this.atual.songId);
+    if(topo && topo.songId!==this.atual.songId && !(parecida && parecida.has(topo.songId)) && topo.score>=o.minMusica &&
+       topo.score-(topoAtual?topoAtual.score:0)>=o.folgaMusica){
+      const f2=this.flat.get(topo.songId);
+      if(f2){
+        const al=vozAlinhar(f2, canon, 0, f2.tokens.length-1, -1);
+        if(al.p>=0 && al.score>=o.minAlinha){
+          const alvo={songId:topo.songId, titulo:topo.titulo, idx:f2.slideDe[al.p], p:al.p, score:al.score};
+          this._propor('musica:'+alvo.songId+':'+alvo.idx,'musica',alvo,agora,o.estabilidadeMusicaMs,leitura);
+          return leitura;
+        }
+      }
+    }
+    if(!f){ this.proposta=null; return leitura; }
+
+    // 2) mesma música: onde, perto de onde estava, as palavras terminam?
+    const perto=vozAlinhar(f, canon, this.pos-o.recuoMax, this.pos+o.avancoMax, this.pos);
+    if(perto.p>=0 && perto.score>=o.minAlinha){
+      const idx=f.slideDe[perto.p];
+      if(idx===this.atual.idx){ this.pos=perto.p; this.proposta=null; return leitura; }
+      const alvo={songId:this.atual.songId, titulo:f.titulo, idx, p:perto.p, score:perto.score};
+      this._propor('slide:'+this.atual.songId+':'+idx,'slide',alvo,agora,o.estabilidadeSlideMs,leitura);
+      return leitura;
+    }
+    // 3) perdeu o fio: procura a música inteira (voltou ao refrão, pulou uma parte)
+    const geral=vozAlinhar(f, canon, 0, f.tokens.length-1, this.pos);
+    if(geral.p>=0 && geral.score>=0.7){
+      const idx=f.slideDe[geral.p];
+      if(idx!==this.atual.idx){
+        const alvo={songId:this.atual.songId, titulo:f.titulo, idx, p:geral.p, score:geral.score};
+        this._propor('salto:'+this.atual.songId+':'+idx,'slide',alvo,agora,o.estabilidadeSaltoMs,leitura);
+        return leitura;
+      }
+    }
+    this.proposta=null; return leitura;
+  }
+}
+/* VOZ-ENGINE-FIM */
+
+const voz={ ligado:false, rec:null, seguidor:null, assinatura:'', ultimaTela:null, sugestao:null, reiniciando:null, testeTimers:[], ouvidoTexto:'', erroRede:false };
+function vozEntrada(){ return window.SpeechRecognition || window.webkitSpeechRecognition; }
+function vozAssinaturaDasMusicas(){
+  return AppState.songs.map(s=>s.id+':'+(s.slides||[]).map(x=>(x.text||'').length).join(',')).join('|');
+}
+function vozGarantirSeguidor(){
+  const ass=vozAssinaturaDasMusicas();
+  if(!voz.seguidor){ voz.seguidor=new SeguidorDeVoz(AppState.songs); voz.assinatura=ass; }
+  else if(ass!==voz.assinatura){ voz.seguidor.reindexar(AppState.songs); voz.assinatura=ass; }
+  // o que está na tela manda quando o operador mexe nela: aí o seguidor continua
+  // dali. Sem mexida, ele segue a própria posição (no modo "só sugerir" a tela
+  // não acompanha o que ele ouve, e corrigi-lo a cada evento apagaria a sugestão)
+  const s=voz.seguidor;
+  const tela=AppState.currentSongId ? AppState.currentSongId+':'+AppState.currentSlideIndex : '';
+  if(tela!==voz.ultimaTela){
+    voz.ultimaTela=tela;
+    if(!AppState.currentSongId){ if(s.atual) s.definirAtual(null); }
+    else s.definirAtual(AppState.currentSongId, AppState.currentSlideIndex);
+  }
+  return s;
+}
+function vozBloqueio(){
+  if(AppState.activeMediaId) return 'Pausado: tem aviso na tela';
+  if(AppState.sermonImage || AppState.sermonVideo) return 'Pausado: tem imagem ou vídeo da pregação na tela';
+  return '';
+}
+function vozMostrarNaTela(songId, idx){
+  if(!AppState.songs.find(s=>s.id===songId)) return;
+  AppState.currentSongId=songId; AppState.currentSlideIndex=idx; AppState.previewOverride=null;
+  voz.ultimaTela=songId+':'+idx;   // fui eu que mudei: não é uma mexida do operador
+  sairDaPregacao();
+  updatePreview();
+  if(AppState.view==='songs' || AppState.view==='playlist') renderView();
+}
+function vozAtualizarPainel(statusTexto, leitura){
+  const st=document.getElementById('voz-status'); if(!st) return;
+  st.textContent=statusTexto;
+  st.style.color = /Pausado|Sem |Não/.test(statusTexto) ? '#e0a85c' : (voz.ligado ? '#5ad67a' : 'var(--text-dim)');
+  const ou=document.getElementById('voz-ouvido');
+  const pal=(leitura&&leitura.palavras&&leitura.palavras.length) ? leitura.palavras.slice(-8).join(' ') : '';
+  ou.textContent = voz.ouvidoTexto ? '“'+voz.ouvidoTexto.slice(-70)+'”' : (pal?'“'+pal+'”':'');
+  const mu=document.getElementById('voz-musica');
+  const at=voz.seguidor && voz.seguidor.atual;
+  const song=at?AppState.songs.find(x=>x.id===at.songId):null;
+  mu.innerHTML = song
+    ? `<strong>${escapeHtml(song.title)}</strong> · slide ${at.idx+1} de ${(song.slides||[]).length}`
+    : '<span style="color:var(--text-dim);">Nenhuma música reconhecida ainda</span>';
+  // o que ele acha que está ouvindo agora, mesmo antes de decidir mexer na tela
+  const m=leitura && leitura.melhor;
+  if(m) mu.innerHTML += `<div style="color:var(--text-dim);margin-top:3px;">Mais parecido agora: ${escapeHtml(m.titulo)} · ${Math.round(m.score*100)}%</div>`;
+}
+function vozProcessar(leitura){
+  if(!leitura) return;
+  const bloqueio=vozBloqueio();
+  const d=leitura.decisao;
+  if(d){
+    const auto=document.getElementById('voz-auto').checked;
+    if(bloqueio){ vozAtualizarPainel(bloqueio, leitura); return; }
+    if(auto){
+      vozMostrarNaTela(d.songId, d.idx);
+      vozAtualizarPainel((d.tipo==='musica'?'Música reconhecida':'Slide acompanhado')+' ✓', leitura);
+    } else {
+      voz.sugestao={texto:'Sugestão (a tela não mudou): '+(d.tipo==='musica'?d.titulo+' · ':'')+'slide '+(d.idx+1), ate:Date.now()+8000};
+      vozAtualizarPainel(voz.sugestao.texto, leitura);
+    }
+    return;
+  }
+  const sug=(voz.sugestao && Date.now()<voz.sugestao.ate) ? voz.sugestao.texto : '';
+  vozAtualizarPainel(bloqueio || sug || (voz.erroRede?'Sem internet para o reconhecimento…':'Ouvindo…'), leitura);
+}
+function vozAlimentar(finais, parcial){
+  const seg=vozGarantirSeguidor();
+  const agora=Date.now();
+  let leitura=null;
+  finais.forEach(t=>{ const l=seg.confirmar(t,agora); if(l && l.decisao){ vozProcessar(l); leitura=null; } else leitura=l; });
+  if(parcial!==null){ const l=seg.parcialAtual(parcial,agora); if(l && l.decisao){ vozProcessar(l); return; } leitura=l; }
+  if(leitura) vozProcessar(leitura);
+}
+function vozLigar(){
+  const SR=vozEntrada();
+  if(!SR){ vozAtualizarPainel('Não funciona neste navegador. Use o Google Chrome.', null); document.getElementById('voz-detalhes').classList.remove('hidden'); return; }
+  voz.ligado=true; voz.erroRede=false; voz.ouvidoTexto='';
+  const btn=document.getElementById('voz-btn');
+  btn.innerHTML='<i class="fa-solid fa-microphone-slash"></i> Parar de acompanhar'; btn.classList.add('accent');
+  document.getElementById('voz-detalhes').classList.remove('hidden');
+  vozGarantirSeguidor();
+  vozAtualizarPainel('Pedindo acesso ao microfone…', null);
+  const iniciar=()=>{
+    if(!voz.ligado) return;
+    const rec=new SR();
+    rec.lang='pt-BR'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+    rec.onstart=()=>{ voz.erroRede=false; vozAtualizarPainel(vozBloqueio()||'Ouvindo…', voz.seguidor&&voz.seguidor.ultimaLeitura); };
+    rec.onresult=ev=>{
+      const finais=[]; let parcial='';
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        const r=ev.results[i], t=r[0].transcript;
+        if(r.isFinal) finais.push(t); else parcial+=t+' ';
+      }
+      voz.ouvidoTexto=(finais.length?finais[finais.length-1]:parcial).trim();
+      vozAlimentar(finais, parcial.trim()?parcial.trim():(finais.length?null:null));
+    };
+    rec.onerror=ev=>{
+      if(ev.error==='not-allowed' || ev.error==='service-not-allowed'){ vozDesligar('O navegador não deixou usar o microfone. Libere no cadeado da barra de endereço.'); }
+      else if(ev.error==='audio-capture'){ vozDesligar('Não achei um microfone.'); }
+      else if(ev.error==='network'){ voz.erroRede=true; vozAtualizarPainel('Sem internet para o reconhecimento…', null); }
+    };
+    rec.onend=()=>{
+      // o Chrome encerra sozinho depois de um tempo de silêncio: religa
+      if(voz.ligado){ clearTimeout(voz.reiniciando); voz.reiniciando=setTimeout(iniciar, voz.erroRede?2000:250); }
+    };
+    voz.rec=rec;
+    try{ rec.start(); }catch(e){ voz.reiniciando=setTimeout(iniciar,500); }
+  };
+  iniciar();
+}
+function vozDesligar(motivo){
+  voz.ligado=false; clearTimeout(voz.reiniciando);
+  voz.testeTimers.forEach(clearTimeout); voz.testeTimers=[];
+  try{ if(voz.rec){ voz.rec.onend=null; voz.rec.stop(); } }catch(e){}
+  voz.rec=null; voz.ouvidoTexto='';
+  const btn=document.getElementById('voz-btn');
+  btn.innerHTML='<i class="fa-solid fa-microphone"></i> Acompanhar por voz'; btn.classList.remove('accent');
+  vozAtualizarPainel(motivo||'Desligado', null);
+}
+document.getElementById('voz-btn').addEventListener('click',()=>{ if(voz.ligado) vozDesligar(); else vozLigar(); });
+try{ document.getElementById('voz-auto').checked = localStorage.getItem('holyrics_voz_auto')!=='0'; }catch(e){}
+document.getElementById('voz-auto').addEventListener('change',e=>{ try{ localStorage.setItem('holyrics_voz_auto', e.target.checked?'1':'0'); }catch(err){} });
+// teste sem microfone: repete o trecho por uns segundos, como se a pessoa continuasse cantando
+document.getElementById('voz-teste').addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const txt=e.target.value.trim(); if(!txt) return;
+  document.getElementById('voz-detalhes').classList.remove('hidden');
+  voz.testeTimers.forEach(clearTimeout); voz.testeTimers=[];
+  voz.ouvidoTexto=txt;
+  [0,600,1200,1800,2400].forEach(ms=>voz.testeTimers.push(setTimeout(()=>vozAlimentar([], txt), ms)));
+});
 
 /* =========================================================
    LUZ DE ESTÚDIO — controla a Amaran 150c por um daemon local
