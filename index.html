@@ -1341,17 +1341,39 @@ function debounce(fn, wait){
   let t; return function(...args){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,args), wait); };
 }
 const bibleBookCache = {};
+/* A fonte do texto (repositório MaatheusGois/bible) tem um defeito de substituição
+   em massa: no lugar de "completa" (completamente, completaram, completando-se,
+   completai…) veio a sequência "full-version" — 99 vezes na NVI, 31 na AA, 15 na
+   ARC/ACF. Conferi as 18 formas que aparecem e todas fecham com "completa".
+   Corrige ao carregar, inclusive o que já estava guardado no navegador. */
+function corrigirTextoBiblico(dados){
+  if(!dados || !Array.isArray(dados.chapters)) return dados;
+  dados.chapters.forEach(cap=>{
+    if(!Array.isArray(cap)) return;
+    for(let i=0;i<cap.length;i++){
+      const t=cap[i];
+      if(typeof t==='string' && t.indexOf('full-version')!==-1){
+        cap[i]=t.replace(/full-version/gi,(m,pos,tudo)=>{
+          const antes=tudo.slice(0,pos);
+          const inicioDeFrase=/^["“'‘(]*$/.test(antes) || /[.!?]["”'’)]*\s+["“'‘(]*$/.test(antes);
+          return inicioDeFrase ? 'Completa' : 'completa';
+        });
+      }
+    }
+  });
+  return dados;
+}
 async function fetchBibleBook(version, bookId){
   const key = `${version}|${bookId}`;
   if(bibleBookCache[key]) return bibleBookCache[key];
   const lsKey = 'biblebook_'+key;
   try{
     const cached = localStorage.getItem(lsKey);
-    if(cached){ const parsed = JSON.parse(cached); bibleBookCache[key]=parsed; return parsed; }
+    if(cached){ const parsed = corrigirTextoBiblico(JSON.parse(cached)); bibleBookCache[key]=parsed; return parsed; }
   }catch(e){}
   const res = await fetch(`${BIBLE_RAW_BASE}/${version}/${bookId}/${bookId}.json`);
   if(!res.ok) throw new Error('status '+res.status);
-  const data = await res.json();
+  const data = corrigirTextoBiblico(await res.json());
   bibleBookCache[key] = data;
   try{ localStorage.setItem(lsKey, JSON.stringify(data)); }catch(e){ /* quota cheia, tudo bem, fica só em memória */ }
   return data;
