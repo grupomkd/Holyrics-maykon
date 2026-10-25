@@ -156,6 +156,8 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);}
   width:100%; background:transparent; border:none; outline:none; resize:none;
   color:var(--text); font-family:inherit; font-size:13px; line-height:1.5;
   padding:0; margin:0; display:block; overflow:hidden;
+  -webkit-appearance:none; appearance:none; opacity:1; -webkit-text-fill-color:var(--text);
+  -webkit-user-drag:none;
 }
 .slide-card textarea.slide-content:focus{
   background:rgba(255,255,255,.03); border-radius:4px;
@@ -957,6 +959,10 @@ let podePublicarLive = false;     // só publico depois de ler o que já está n
 
 function pushLiveState(){
   if(isTvMode) return;            // TV nunca escreve, só escuta
+  // teste local (127.0.0.1 / localhost) compartilha o banco da igreja: sem esta
+  // trava, abrir o app para testar mandava o slide de teste para a tela ao vivo
+  // e o telão "voltava para o primeiro slide" em pleno culto
+  if(location.hostname==='127.0.0.1' || location.hostname==='localhost') return;
   if(aplicandoLive) return;       // veio de outro aparelho: não devolve o eco
   if(!podePublicarLive) return;   // ainda não li o estado atual: não atropelo quem já está no ar
   clearTimeout(liveSaveTimer);
@@ -1386,6 +1392,7 @@ function isMobileView(){ return window.matchMedia('(max-width: 860px)').matches;
 function setMobilePane(pane){
   if(!isMobileView()) return;
   document.body.dataset.mobilePane = pane;
+  agendarRepintura();
   const backBtn=document.getElementById('mobile-back-btn');
   const titleEl=document.getElementById('mobile-title');
   if(backBtn) backBtn.classList.toggle('show', pane==='center');
@@ -1396,6 +1403,21 @@ function setMobilePane(pane){
     b.classList.toggle('active', isActive);
   });
 }
+/* No celular os painéis alternam entre display:none e display:flex. O Safari do
+   iPhone às vezes não repinta o texto dos <textarea> dos slides depois dessa troca
+   (o cartão aparece, o texto não), e a altura calculada com o painel escondido sai
+   errada. Quando o painel já está visível, remede e obriga o campo a refazer o texto. */
+function repintarCamposDeSlide(){
+  document.querySelectorAll('textarea.slide-content').forEach(t=>{
+    if(!t.offsetParent || document.activeElement===t) return;
+    t.style.height='auto'; t.style.height=(t.scrollHeight+2)+'px';
+    const v=t.value; t.value=''; t.value=v;
+  });
+}
+function agendarRepintura(){ requestAnimationFrame(()=>requestAnimationFrame(repintarCamposDeSlide)); }
+window.addEventListener('resize', debounce(repintarCamposDeSlide,200));
+window.addEventListener('orientationchange', ()=>setTimeout(repintarCamposDeSlide,250));
+window.addEventListener('pageshow', agendarRepintura);
 function updateMobilePaneAuto(){
   if(!isMobileView()) return;
   if(AppState.mobileActiveTab==='right'){ setMobilePane('right'); return; }
@@ -1407,6 +1429,7 @@ function updateMobilePaneAuto(){
   else if(AppState.view==='themes') hasDetail=!!AppState.editingThemeId;
   else if(AppState.view==='links') hasDetail=!!AppState.currentLinkId;
   setMobilePane(hasDetail?'center':'left');
+  agendarRepintura();
 }
 function clearCurrentDetail(){
   if(AppState.view==='bible'){ AppState.bible.book=null; }
@@ -1973,7 +1996,7 @@ function renderSongsCenter(container){
   song.slides.forEach((slide,idx)=>{
     const card=document.createElement('div');
     card.className='slide-card'+(idx===AppState.currentSlideIndex && AppState.currentSongId===song.id ?' current':'');
-    card.draggable=true;
+    card.draggable=!window.matchMedia('(pointer:coarse)').matches;
     card.dataset.idx=idx;
     card.innerHTML=`<div class="slide-idx">Slide ${idx+1}</div>
       <div class="slide-actions">
@@ -1984,7 +2007,7 @@ function renderSongsCenter(container){
       <textarea class="slide-content" rows="1"></textarea>`;
     const textarea = card.querySelector('.slide-content');
     textarea.value = slide.text;
-    const autoResize = ()=>{ textarea.style.height='auto'; textarea.style.height=(textarea.scrollHeight+2)+'px'; };
+    const autoResize = ()=>{ if(!textarea.offsetParent) return; textarea.style.height='auto'; textarea.style.height=(textarea.scrollHeight+2)+'px'; };
     const debouncedSave = debounce(()=>{
       slide.text = textarea.value; saveState(); saveSongCloud(song);
       const preview = document.getElementById('preview-text-el');
